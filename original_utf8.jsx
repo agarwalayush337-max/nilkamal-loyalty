@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, Plus, Image as ImageIcon, Camera, X, Award, FileText, CheckCircle2, AlertCircle, Clock, LayoutDashboard, Gift, History, Mic, Megaphone } from 'lucide-react';
-import { collection, addDoc, query, where, getDocs, orderBy, onSnapshot, doc } from 'firebase/firestore';
+import { LogOut, Plus, Image as ImageIcon, Camera, X, Award, FileText, CheckCircle2, AlertCircle, Clock, LayoutDashboard, Gift, History } from 'lucide-react';
+import { collection, addDoc, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 
 const translations = {
@@ -10,7 +10,6 @@ const translations = {
     tabDashboard: "Dashboard",
     tabRewards: "Rewards",
     tabHistory: "History",
-    tabUpdates: "Updates",
     
     // Dashboard / Points
     totalPoints: "YOUR TOTAL POINTS",
@@ -77,10 +76,8 @@ const translations = {
     estPoints: "Estimated Points to Earn",
     noteRft: "Note: You earn exactly 1 Point for every 1 Running Foot (RFT).",
     enterAmt: "3. Enter Bill Amount (₹) *",
-    placeOpt: "4. Place / Location (Optional)",
-    placePlaceholder: "e.g. Kashipur",
-    billNumOpt: "5. Bill Number (Optional)",
-    billDateLabel: "6. Bill Date *",
+    billNumOpt: "4. Bill Number (Optional)",
+    billDateLabel: "5. Bill Date *",
     sendBillNow: "Send Bill Now",
     submitted: "SUBMITTED!",
     waitApproval: "Wait for master approval to get points."
@@ -90,7 +87,6 @@ const translations = {
     tabDashboard: "डैशबोर्ड",
     tabRewards: "इनाम",
     tabHistory: "इतिहास",
-    tabUpdates: "अपडेट्स",
     
     // Dashboard / Points
     totalPoints: "आपके कुल पॉइंट्स",
@@ -157,10 +153,8 @@ const translations = {
     estPoints: "अर्जित करने के लिए अनुमानित पॉइंट्स",
     noteRft: "नोट: आप प्रत्येक 1 रनिंग फुट (RFT) के लिए ठीक 1 पॉइंट अर्जित करते हैं।",
     enterAmt: "3. बिल राशि (₹) दर्ज करें *",
-    placeOpt: "4. स्थान / जगह (वैकल्पिक)",
-    placePlaceholder: "उदा. काशीपुर",
-    billNumOpt: "5. बिल संख्या (वैकल्पिक)",
-    billDateLabel: "6. बिल दिनांक *",
+    billNumOpt: "4. बिल संख्या (वैकल्पिक)",
+    billDateLabel: "5. बिल दिनांक *",
     sendBillNow: "अभी बिल भेजें",
     submitted: "सबमिट हो गया!",
     waitApproval: "पॉइंट्स प्राप्त करने के लिए मुख्य मंजूरी की प्रतीक्षा करें।"
@@ -187,28 +181,6 @@ const formatDate = (timestamp) => {
   return `${day}/${month}/${year}`;
 };
 
-const formatDateTime = (timestamp) => {
-  if (!timestamp) return 'N/A';
-  let date;
-  if (timestamp.seconds) {
-    date = new Date(timestamp.seconds * 1000);
-  } else if (timestamp instanceof Date) {
-    date = timestamp;
-  } else {
-    date = new Date(timestamp);
-  }
-
-  if (isNaN(date.getTime())) return 'N/A';
-
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const year = date.getFullYear();
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-
-  return `${day}/${month}/${year} ${hours}:${minutes}`;
-};
-
 export default function ContractorDashboard() {
   const { user, userData, logout, isMock, setUserData, updateActiveGoal, updateContractorPoints, updateContractorTransaction } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -229,28 +201,15 @@ export default function ContractorDashboard() {
   const [billNumber, setBillNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [runningFeet, setRunningFeet] = useState('');
-  const [place, setPlace] = useState('');
   const [billDate, setBillDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [billImage, setBillImage] = useState(null);
   const [billImagePreview, setBillImagePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
-  // Speech-to-Text States
-  const [isListening, setIsListening] = useState(false);
-  const [voiceTranscript, setVoiceTranscript] = useState('');
-  const [listeningError, setListeningError] = useState('');
-
-  // Toast notifications state
-  const [toasts, setToasts] = useState([]);
-
   // Claims history state
   const [claims, setClaims] = useState([]);
   const [loadingClaims, setLoadingClaims] = useState(true);
-
-  // Announcements state
-  const [announcements, setAnnouncements] = useState([]);
-  const [loadingAnnouncements, setLoadingAnnouncements] = useState(true);
 
   // Phase 3 States
   const [goals, setGoals] = useState([]);
@@ -260,10 +219,6 @@ export default function ContractorDashboard() {
   const [redeeming, setRedeeming] = useState(false);
   const [redeemSuccess, setRedeemSuccess] = useState(false);
   const [selectedDeliveryProof, setSelectedDeliveryProof] = useState(null);
-
-  // Refs for tracking old states to show Toast notifications
-  const prevClaimsRef = useRef([]);
-  const prevRedemptionsRef = useRef([]);
 
   // Load claims from Firestore or localStorage
   const loadClaims = async () => {

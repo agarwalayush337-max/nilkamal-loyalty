@@ -1,0 +1,1451 @@
+﻿diff --git a/src/views/ContractorDashboard.jsx b/src/views/ContractorDashboard.jsx
+index dd152aa..973e3b8 100644
+--- a/src/views/ContractorDashboard.jsx
++++ b/src/views/ContractorDashboard.jsx
+@@ -1,7 +1,7 @@
+ import React, { useState, useEffect } from 'react';
+ import { useAuth } from '../context/AuthContext';
+-import { LogOut, Plus, Image as ImageIcon, Camera, X, Award, FileText, CheckCircle2, AlertCircle, Clock, LayoutDashboard, Gift, History } from 'lucide-react';
+-import { collection, addDoc, query, where, getDocs, orderBy } from 'firebase/firestore';
++import { LogOut, Plus, Image as ImageIcon, Camera, X, Award, FileText, CheckCircle2, AlertCircle, Clock, LayoutDashboard, Gift, History, Mic, Megaphone } from 'lucide-react';
++import { collection, addDoc, query, where, getDocs, orderBy, onSnapshot, doc } from 'firebase/firestore';
+ import { db } from '../firebase';
+ 
+ const translations = {
+@@ -10,6 +10,7 @@ const translations = {
+     tabDashboard: "Dashboard",
+     tabRewards: "Rewards",
+     tabHistory: "History",
++    tabUpdates: "Updates",
+     
+     // Dashboard / Points
+     totalPoints: "YOUR TOTAL POINTS",
+@@ -87,6 +88,7 @@ const translations = {
+     tabDashboard: "αñíαÑêαñ╢αñ¼αÑïαñ░αÑìαñí",
+     tabRewards: "αñçαñ¿αñ╛αñ«",
+     tabHistory: "αñçαññαñ┐αñ╣αñ╛αñ╕",
++    tabUpdates: "αñàαñ¬αñíαÑçαñƒ",
+     
+     // Dashboard / Points
+     totalPoints: "αñåαñ¬αñòαÑç αñòαÑüαñ▓ αñ¬αÑëαñçαñéαñƒαÑìαñ╕",
+@@ -201,12 +203,24 @@ export default function ContractorDashboard() {
+   const [billNumber, setBillNumber] = useState('');
+   const [amount, setAmount] = useState('');
+   const [runningFeet, setRunningFeet] = useState('');
++  const [place, setPlace] = useState('');
+   const [billDate, setBillDate] = useState(() => new Date().toISOString().split('T')[0]);
+   const [billImage, setBillImage] = useState(null);
+   const [billImagePreview, setBillImagePreview] = useState(null);
+   const [uploading, setUploading] = useState(false);
+   const [submitSuccess, setSubmitSuccess] = useState(false);
+ 
++  // Notifications, Toasts and Announcements
++  const [toasts, setToasts] = useState([]);
++  const [announcements, setAnnouncements] = useState([]);
++  const [loadingAnnouncements, setLoadingAnnouncements] = useState(true);
++
++  // Voice recognition states
++  const [isListening, setIsListening] = useState(false);
++  const [voiceTranscript, setVoiceTranscript] = useState('');
++  const [parsedResults, setParsedResults] = useState(null);
++  const [listeningError, setListeningError] = useState('');
++
+   // Claims history state
+   const [claims, setClaims] = useState([]);
+   const [loadingClaims, setLoadingClaims] = useState(true);
+@@ -220,50 +234,20 @@ export default function ContractorDashboard() {
+   const [redeemSuccess, setRedeemSuccess] = useState(false);
+   const [selectedDeliveryProof, setSelectedDeliveryProof] = useState(null);
+ 
+-  // Load claims from Firestore or localStorage
+-  const loadClaims = async () => {
+-    setLoadingClaims(true);
+-    if (isMock) {
+-      const savedClaims = localStorage.getItem('nilkamal_mock_claims');
+-      const mockClaimsList = savedClaims ? JSON.parse(savedClaims) : [];
+-      // Filter claims for current user
+-      const filtered = mockClaimsList.filter(c => c.contractorId === user.uid);
+-      // Sort by timestamp desc
+-      filtered.sort((a, b) => b.timestamp - a.timestamp);
+-      setClaims(filtered);
+-      setLoadingClaims(false);
+-      return;
+-    }
+-
+-    try {
+-      const claimsRef = collection(db, 'claims');
+-      const q = query(
+-        claimsRef, 
+-        where('contractorId', '==', user.uid)
+-      );
+-      const querySnapshot = await getDocs(q);
+-      const claimsList = [];
+-      querySnapshot.forEach((doc) => {
+-        claimsList.push({ id: doc.id, ...doc.data() });
+-      });
+-      // Sort by timestamp desc locally if orderBy requires indexes we haven't configured yet
+-      claimsList.sort((a, b) => {
+-        const t1 = a.timestamp?.seconds || a.timestamp || 0;
+-        const t2 = b.timestamp?.seconds || b.timestamp || 0;
+-        return t2 - t1;
+-      });
+-      setClaims(claimsList);
+-    } catch (err) {
+-      console.error("Error loading claims from Firestore:", err);
+-      // Fallback: load mock claims anyway to prevent crash
+-      const savedClaims = localStorage.getItem('nilkamal_mock_claims');
+-      const mockClaimsList = savedClaims ? JSON.parse(savedClaims) : [];
+-      setClaims(mockClaimsList.filter(c => c.contractorId === user.uid));
+-    } finally {
+-      setLoadingClaims(false);
+-    }
++  // Helper to show custom in-app Toast notifications
++  const showToast = (message, type = 'info') => {
++    const id = Date.now();
++    setToasts(prev => [...prev, { id, message, type }]);
++    setTimeout(() => {
++      setToasts(prev => prev.filter(t => t.id !== id));
++    }, 4500);
+   };
+ 
++  // Compatibility dummy functions
++  const loadClaims = () => { /* Handled in real-time subscriptions */ };
++  const loadRedemptions = () => { /* Handled in real-time subscriptions */ };
++
++  // Load goals (one-time fetch)
+   const loadGoals = async () => {
+     setLoadingGoals(true);
+     if (isMock) {
+@@ -295,24 +279,73 @@ export default function ContractorDashboard() {
+     }
+   };
+ 
+-  const loadRedemptions = async () => {
+-    setLoadingRedemptions(true);
++  // Real-time listener for claims
++  useEffect(() => {
++    if (!user) return;
++
+     if (isMock) {
+-      const saved = localStorage.getItem('nilkamal_mock_redemptions');
+-      const mockRedemptions = saved ? JSON.parse(saved) : [];
+-      const filtered = mockRedemptions.filter(r => r.contractorId === user.uid);
+-      filtered.sort((a, b) => b.timestamp - a.timestamp);
+-      setRedemptions(filtered);
+-      setLoadingRedemptions(false);
+-      return;
++      const handleMockClaims = () => {
++        const savedClaims = localStorage.getItem('nilkamal_mock_claims');
++        const mockClaimsList = savedClaims ? JSON.parse(savedClaims) : [];
++        const filtered = mockClaimsList.filter(c => c.contractorId === user.uid);
++        filtered.sort((a, b) => b.timestamp - a.timestamp);
++        setClaims(filtered);
++        setLoadingClaims(false);
++      };
++      handleMockClaims();
++      window.addEventListener('nilkamal_mock_db_update', handleMockClaims);
++      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockClaims);
+     }
+ 
+-    try {
+-      const redemptionsRef = collection(db, 'redemptions');
+-      const q = query(redemptionsRef, where('contractorId', '==', user.uid));
+-      const querySnapshot = await getDocs(q);
++    setLoadingClaims(true);
++    const claimsRef = collection(db, 'claims');
++    const q = query(claimsRef, where('contractorId', '==', user.uid));
++
++    const unsubscribe = onSnapshot(q, (snapshot) => {
++      const claimsList = [];
++      snapshot.forEach((doc) => {
++        claimsList.push({ id: doc.id, ...doc.data() });
++      });
++      claimsList.sort((a, b) => {
++        const t1 = a.timestamp?.seconds || a.timestamp || 0;
++        const t2 = b.timestamp?.seconds || b.timestamp || 0;
++        return t2 - t1;
++      });
++      setClaims(claimsList);
++      setLoadingClaims(false);
++    }, (err) => {
++      console.error("Error subscribing to claims:", err);
++      setLoadingClaims(false);
++    });
++
++    return () => unsubscribe();
++  }, [user, isMock]);
++
++  // Real-time listener for redemptions
++  useEffect(() => {
++    if (!user) return;
++
++    if (isMock) {
++      const handleMockRedemptions = () => {
++        const saved = localStorage.getItem('nilkamal_mock_redemptions');
++        const mockRedemptionsList = saved ? JSON.parse(saved) : [];
++        const filtered = mockRedemptionsList.filter(r => r.contractorId === user.uid);
++        filtered.sort((a, b) => b.timestamp - a.timestamp);
++        setRedemptions(filtered);
++        setLoadingRedemptions(false);
++      };
++      handleMockRedemptions();
++      window.addEventListener('nilkamal_mock_db_update', handleMockRedemptions);
++      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockRedemptions);
++    }
++
++    setLoadingRedemptions(true);
++    const redemptionsRef = collection(db, 'redemptions');
++    const q = query(redemptionsRef, where('contractorId', '==', user.uid));
++
++    const unsubscribe = onSnapshot(q, (snapshot) => {
+       const redemptionsList = [];
+-      querySnapshot.forEach((doc) => {
++      snapshot.forEach((doc) => {
+         redemptionsList.push({ id: doc.id, ...doc.data() });
+       });
+       redemptionsList.sort((a, b) => {
+@@ -321,15 +354,109 @@ export default function ContractorDashboard() {
+         return t2 - t1;
+       });
+       setRedemptions(redemptionsList);
+-    } catch (err) {
+-      console.error("Error loading redemptions:", err);
+-      const saved = localStorage.getItem('nilkamal_mock_redemptions');
+-      const mockRedemptions = saved ? JSON.parse(saved) : [];
+-      setRedemptions(mockRedemptions.filter(r => r.contractorId === user.uid));
+-    } finally {
+       setLoadingRedemptions(false);
++    }, (err) => {
++      console.error("Error subscribing to redemptions:", err);
++      setLoadingRedemptions(false);
++    });
++
++    return () => unsubscribe();
++  }, [user, isMock]);
++
++  // Real-time listener for announcements
++  useEffect(() => {
++    if (!user) return;
++
++    if (isMock) {
++      const handleMockAnnouncements = () => {
++        const saved = localStorage.getItem('nilkamal_mock_announcements');
++        const mockAnnList = saved ? JSON.parse(saved) : [];
++        mockAnnList.sort((a, b) => b.timestamp - a.timestamp);
++        setAnnouncements(mockAnnList);
++        setLoadingAnnouncements(false);
++      };
++      handleMockAnnouncements();
++      window.addEventListener('nilkamal_mock_db_update', handleMockAnnouncements);
++      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockAnnouncements);
+     }
+-  };
++
++    setLoadingAnnouncements(true);
++    const announcementsRef = collection(db, 'announcements');
++    const q = query(announcementsRef, orderBy('timestamp', 'desc'));
++
++    const unsubscribe = onSnapshot(q, (snapshot) => {
++      const annList = [];
++      snapshot.forEach((doc) => {
++        annList.push({ id: doc.id, ...doc.data() });
++      });
++      annList.sort((a, b) => {
++        const t1 = a.timestamp?.seconds || a.timestamp || 0;
++        const t2 = b.timestamp?.seconds || b.timestamp || 0;
++        return t2 - t1;
++      });
++      setAnnouncements(annList);
++      setLoadingAnnouncements(false);
++    }, (err) => {
++      console.error("Error subscribing to announcements:", err);
++      getDocs(announcementsRef).then(snap => {
++        const list = [];
++        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
++        list.sort((a, b) => (b.timestamp?.seconds || b.timestamp || 0) - (a.timestamp?.seconds || a.timestamp || 0));
++        setAnnouncements(list);
++      }).catch(e => console.error("Announcements fallback error:", e));
++      setLoadingAnnouncements(false);
++    });
++
++    return () => unsubscribe();
++  }, [user, isMock]);
++
++  // Real-time listener for notifications
++  const [shownNotifications] = useState(() => new Set());
++  useEffect(() => {
++    if (!user) return;
++
++    if (isMock) {
++      const handleMockNotifications = () => {
++        const saved = localStorage.getItem('nilkamal_mock_notifications');
++        const mockNotifs = saved ? JSON.parse(saved) : [];
++        const userNotifs = mockNotifs.filter(n => n.contractorId === user.uid);
++        userNotifs.forEach(notif => {
++          if (!shownNotifications.has(notif.id)) {
++            shownNotifications.add(notif.id);
++            showToast(notif.message, 'success');
++            if ('Notification' in window && Notification.permission === 'granted') {
++              new Notification(notif.title || "Nilkamal Loyalty Update", { body: notif.message });
++            }
++          }
++        });
++      };
++      handleMockNotifications();
++      window.addEventListener('nilkamal_mock_db_update', handleMockNotifications);
++      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockNotifications);
++    }
++
++    const notificationsRef = collection(db, 'notifications');
++    const q = query(notificationsRef, where('contractorId', '==', user.uid));
++
++    const unsubscribe = onSnapshot(q, (snapshot) => {
++      snapshot.docChanges().forEach((change) => {
++        if (change.type === 'added') {
++          const notif = { id: change.doc.id, ...change.doc.data() };
++          if (!shownNotifications.has(notif.id)) {
++            shownNotifications.add(notif.id);
++            showToast(notif.message, 'success');
++            if ('Notification' in window && Notification.permission === 'granted') {
++              new Notification(notif.title || "Nilkamal Loyalty Update", { body: notif.message });
++            }
++          }
++        }
++      });
++    }, (err) => {
++      console.error("Error subscribing to notifications:", err);
++    });
++
++    return () => unsubscribe();
++  }, [user, isMock]);
+ 
+   const handleSelectGoal = async (goal) => {
+     try {
+@@ -437,6 +564,144 @@ export default function ContractorDashboard() {
+     }
+   };
+ 
++  const parseVoiceInput = (text) => {
++    const textLower = text.toLowerCase();
++    console.log("Parsing voice transcript:", text);
++
++    let parsedRft = '';
++    let parsedAmount = '';
++    let parsedPlace = '';
++    let parsedDate = '';
++
++    // RFT: Match numbers preceding or following ft, feet, foot, αñ½αÑÇαñƒ, αñ½αñ┐αñƒ, αñ░αñ¿αñ┐αñéαñù
++    const rftRegexes = [
++      /(\d+(?:\.\d+)?)\s*(?:feet|foot|ft|αñ½αÑÇαñƒ|αñ½αñ┐αñƒ|αñ░αñ¿αñ┐αñéαñù|αñ░αñ¿αñ┐αñù|αñ░αñ¿αñ░)/gi,
++      /(?:feet|foot|ft|αñ½αÑÇαñƒ|αñ½αñ┐αñƒ|αñ░αñ¿αñ┐αñéαñù|αñ░αñ¿αñ┐αñù|αñ░αñ¿αñ░)\s*(\d+(?:\.\d+)?)/gi
++    ];
++    for (const regex of rftRegexes) {
++      const matches = [...textLower.matchAll(regex)];
++      if (matches.length > 0) {
++        parsedRft = matches[0][1];
++        break;
++      }
++    }
++
++    // Amount: Match numbers preceding/following rupees, rs, rupaye, αñ░αÑüαñ¬αñÅ, αñ░αÑüαñ¬αñ»αÑç, αñ░αÑüαñ¬αñ┐αñ»αñ╛, αñ╣αñ£αñ╛αñ░, hazar, thousand
++    const amtRegexes = [
++      /(\d+(?:\.\d+)?)\s*(?:thousand|hazar|αñ╣αñ£αñ╛αñ░|αñ╣αñ£αñ╝αñ╛αñ░)/gi,
++      /(\d+(?:\.\d+)?)\s*(?:rupees|rupaye|rupe|rs|αñ░αÑüαñ¬αñÅ|αñ░αÑüαñ¬αñ»αÑç|αñ░αÑüαñ¬αñ»αñ╛|αñ░αÑü)/gi,
++      /(?:rupees|rupaye|rupe|rs|αñ░αÑüαñ¬αñÅ|αñ░αÑüαñ¬αñ»αÑç|αñ░αÑüαñ¬αñ»αñ╛|αñ░αÑü)\s*(\d+(?:\.\d+)?)/gi
++    ];
++    for (const regex of amtRegexes) {
++      const matches = [...textLower.matchAll(regex)];
++      if (matches.length > 0) {
++        const match = matches[0];
++        if (regex.source.includes('thousand') || regex.source.includes('hazar') || regex.source.includes('αñ╣αñ£αñ╛αñ░') || regex.source.includes('αñ╣αñ£αñ╝αñ╛αñ░')) {
++          parsedAmount = String(parseFloat(match[1]) * 1000);
++        } else {
++          parsedAmount = match[1];
++        }
++        break;
++      }
++    }
++
++    // Place: Match words preceding: ka hai party, ki party, ka party, se, αñòαñ╛ αñ╣αÑê αñ¬αñ╛αñ░αÑìαñƒαÑÇ, αñòαÑÇ αñ¬αñ╛αñ░αÑìαñƒαÑÇ, αñòαñ╛ αñ╣αÑê, αñòαñ╛ αñ«αñ╛αñ▓, αñòαñ╛, αñòαÑÇ
++    const placeRegexes = [
++      /([a-zA-Z0-9\u0900-\u097F\s]+?)\s+(?:ka\s+hai\s+party|ki\s+party|ka\s+party|ka\s+maal|se|αñòαñ╛\s+αñ╣αÑê\s+αñ¬αñ╛αñ░αÑìαñƒαÑÇ|αñòαÑÇ\s+αñ¬αñ╛αñ░αÑìαñƒαÑÇ|αñòαñ╛\s+αñ╣αÑê|αñòαñ╛\s+αñ«αñ╛αñ▓|αñ╕αÑç|αñòαñ╛|αñòαÑÇ)/gi
++    ];
++    for (const regex of placeRegexes) {
++      const matches = [...textLower.matchAll(regex)];
++      if (matches.length > 0) {
++        const match = matches[0];
++        const words = match[1].trim().split(/\s+/);
++        if (words.length > 0) {
++          const stopWords = ['hai', 'tha', 'lia', 'liya', 'hi', 'αñ╣αÑê', 'αñÑαñ╛', 'αñ▓αñ┐αñ»αñ╛', 'αñ▓αÑÇ', 'αñòαñ╛', 'αñ╕αÑç', 'αñòαÑï', 'αñòαÑÇ', 'αñ░αÑüαñ¬αñÅ', 'αñ░αÑüαñ¬αñ»αÑç', 'αñ½αÑÇαñƒ', 'αñ½αñ┐αñƒ', 'αñ░αñ¿αñ┐αñéαñù', 'αñ░αñ¿αñ┐αñù', 'αñ«αñ╛αñ▓', 'maal'];
++          const filteredWords = words.filter(w => !stopWords.includes(w.toLowerCase()));
++          if (filteredWords.length > 0) {
++            parsedPlace = filteredWords.slice(-2).join(' ');
++          }
++        }
++        break;
++      }
++    }
++
++    // Date: Match [number] tarik/tarikh/ko/αñòαÑï/αññαñ╛αñ░αÑÇαñû/αññαñ╛αñ░αÑÇαÑÖ
++    const dateRegexes = [
++      /(\d{1,2})\s*(?:tarik|tarikh|tariq|αññαñ╛αñ░αÑÇαñû|αññαñ╛αñ░αÑÇαÑÖ|ko|αñòαÑï)/gi
++    ];
++    for (const regex of dateRegexes) {
++      const matches = [...textLower.matchAll(regex)];
++      if (matches.length > 0) {
++        const day = parseInt(matches[0][1], 10);
++        if (day >= 1 && day <= 31) {
++          const now = new Date();
++          const year = now.getFullYear();
++          const month = String(now.getMonth() + 1).padStart(2, '0');
++          const formattedDay = String(day).padStart(2, '0');
++          parsedDate = `${year}-${month}-${formattedDay}`;
++          break;
++        }
++      }
++    }
++
++    return {
++      rft: parsedRft,
++      amount: parsedAmount,
++      place: parsedPlace,
++      date: parsedDate
++    };
++  };
++
++  const startVoiceRecognition = () => {
++    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
++    if (!SpeechRecognition) {
++      showToast(language === 'en' ? 'Speech recognition not supported in this browser.' : 'αñçαñ╕ αñ¼αÑìαñ░αñ╛αñëαñ£αñ╝αñ░ αñ«αÑçαñé αñ╕αÑìαñ¬αÑÇαñÜ αñ░αñ┐αñòαñùαÑìαñ¿αñ┐αñ╢αñ¿ αñ╕αñ«αñ░αÑìαñÑαñ┐αññ αñ¿αñ╣αÑÇαñé αñ╣αÑêαÑñ', 'error');
++      return;
++    }
++    const recognition = new SpeechRecognition();
++    recognition.lang = 'hi-IN';
++    recognition.interimResults = false;
++    recognition.maxAlternatives = 1;
++
++    setIsListening(true);
++    setListeningError('');
++    setVoiceTranscript('');
++    setParsedResults(null);
++
++    recognition.onstart = () => {
++      console.log("Speech recognition started");
++    };
++
++    recognition.onerror = (event) => {
++      console.error("Speech recognition error", event.error);
++      setListeningError(language === 'en' ? `Error: ${event.error}` : `αññαÑìαñ░αÑüαñƒαñ┐: ${event.error}`);
++      setIsListening(false);
++    };
++
++    recognition.onend = () => {
++      setIsListening(false);
++    };
++
++    recognition.onresult = (event) => {
++      const transcript = event.results[0][0].transcript;
++      setVoiceTranscript(transcript);
++      
++      // Parse results
++      const parsed = parseVoiceInput(transcript);
++      setParsedResults(parsed);
++
++      // Apply values to inputs
++      if (parsed.rft) setRunningFeet(parsed.rft);
++      if (parsed.amount) setAmount(parsed.amount);
++      if (parsed.place) setPlace(parsed.place);
++      if (parsed.date) setBillDate(parsed.date);
++      
++      showToast(language === 'en' ? "Voice input filled successfully!" : "αñåαñ╡αñ╛αñ£ αñçαñ¿αñ¬αÑüαñƒ αñ╕αñ½αñ▓αññαñ╛αñ¬αÑéαñ░αÑìαñ╡αñò αñ¡αñ░αñ╛ αñùαñ»αñ╛!", 'success');
++    };
++
++    recognition.start();
++  };
++
+   // Submit Claim
+   const handleSubmitClaim = async (e) => {
+     e.preventDefault();
+@@ -458,7 +723,8 @@ export default function ContractorDashboard() {
+       imageUrl: billImagePreview || '',
+       status: 'pending',
+       timestamp: Date.now(),
+-      billDate: billDate || new Date().toISOString().split('T')[0]
++      billDate: billDate || new Date().toISOString().split('T')[0],
++      place: place.trim()
+     };
+ 
+     if (isMock) {
+@@ -469,6 +735,7 @@ export default function ContractorDashboard() {
+       localStorage.setItem('nilkamal_mock_claims', JSON.stringify(allClaims));
+ 
+       await updateContractorTransaction(user.uid, `Submitted Bill ${newClaim.billNumber}`);
++      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
+ 
+       // Simulate network delay
+       setTimeout(() => {
+@@ -477,6 +744,7 @@ export default function ContractorDashboard() {
+         setBillNumber('');
+         setAmount('');
+         setRunningFeet('');
++        setPlace('');
+         setBillDate(new Date().toISOString().split('T')[0]);
+         setBillImage(null);
+         setBillImagePreview(null);
+@@ -501,6 +769,7 @@ export default function ContractorDashboard() {
+       setBillNumber('');
+       setAmount('');
+       setRunningFeet('');
++      setPlace('');
+       setBillDate(new Date().toISOString().split('T')[0]);
+       setBillImage(null);
+       setBillImagePreview(null);
+@@ -523,6 +792,7 @@ export default function ContractorDashboard() {
+       setBillNumber('');
+       setAmount('');
+       setRunningFeet('');
++      setPlace('');
+       setBillDate(new Date().toISOString().split('T')[0]);
+       setBillImage(null);
+       setBillImagePreview(null);
+@@ -536,6 +806,27 @@ export default function ContractorDashboard() {
+ 
+   return (
+     <div className="min-h-screen bg-slate-100 flex flex-col pb-24">
++      {/* Toast Notification Container */}
++      <div className="fixed top-4 left-4 right-4 z-[999] pointer-events-none flex flex-col gap-2 max-w-md mx-auto">
++        {toasts.map(toast => (
++          <div 
++            key={toast.id} 
++            className={`p-4 rounded-2xl shadow-xl text-white font-extrabold text-xs flex items-center justify-between pointer-events-auto animate-slide-in border ${
++              toast.type === 'success' ? 'bg-emerald-600 border-emerald-500' : 
++              toast.type === 'error' ? 'bg-rose-600 border-rose-500' : 'bg-brand-blue border-brand-blue-400'
++            }`}
++          >
++            <span>{toast.message}</span>
++            <button 
++              onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
++              className="ml-2 hover:opacity-80 focus:outline-none cursor-pointer"
++            >
++              <X className="w-4 h-4" />
++            </button>
++          </div>
++        ))}
++      </div>
++
+       {/* Header */}
+       <header className="bg-brand-dark text-white p-4 shadow-md flex justify-between items-center sticky top-0 z-10">
+         <div>
+@@ -581,140 +872,277 @@ export default function ContractorDashboard() {
+       </header>
+ 
+       {/* Main Content (Mobile Optimized) */}
+-      <main className="max-w-md w-full mx-auto p-4 flex-1 flex flex-col gap-6">
++      <main className="max-w-md w-full mx-auto p-4 flex-1 flex flex-col gap-4">
+         
+         {activeTab === 'dashboard' && (
+           <>
+-            {/* Points Display - GIGANTIC */}
+-            <div className="bg-gradient-to-br from-brand-dark to-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 text-center relative overflow-hidden">
+-              <div className="absolute -top-10 -right-10 w-32 h-32 bg-brand-blue/10 rounded-full blur-2xl"></div>
+-              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-yellow-500/5 rounded-full blur-2xl"></div>
++            {/* Points Display - Premium Full Width Card */}
++            <div className="bg-gradient-to-br from-brand-dark to-slate-900 text-white rounded-3xl p-5 shadow-xl border border-slate-800 relative overflow-hidden flex items-center justify-between min-h-[120px]">
++              <div className="absolute -top-12 -right-12 w-32 h-32 bg-brand-blue/20 rounded-full blur-3xl"></div>
++              <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl"></div>
+               
+-              <div className="flex justify-center mb-2">
+-                <Award className="w-12 h-12 text-yellow-400 animate-bounce" />
++              <div className="space-y-1 relative z-10">
++                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{t.totalPoints}</p>
++                <h2 className="text-4xl font-black text-white tracking-tight drop-shadow-md flex items-baseline gap-1">
++                  {(userData?.totalPoints || 0).toLocaleString()}
++                  <span className="text-xs font-bold text-slate-400 tracking-normal uppercase">Pts</span>
++                </h2>
++                <p className="text-[9px] text-brand-blue font-bold uppercase tracking-widest">{t.subPoints}</p>
++              </div>
++
++              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700/60 shadow-inner relative z-10">
++                <Award className="w-8 h-8 text-yellow-400 animate-pulse" />
+               </div>
+-              
+-              <p className="text-xs font-black uppercase tracking-widest text-slate-400">{t.totalPoints}</p>
+-              <h2 className="text-6xl font-black text-white mt-1 tracking-tight drop-shadow-md">
+-                {(userData?.totalPoints || 0).toLocaleString()}
+-              </h2>
+-              <p className="text-[10px] text-brand-blue font-bold uppercase tracking-widest mt-2">{t.subPoints}</p>
+             </div>
+ 
+-            {/* Active Goal Progress Card */}
+-            <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-200">
+-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 text-center">
+-                {t.activeGoalProgress}
+-              </h3>
++            {/* Active Goal Progress Card - Premium Full Width */}
++            <div className="bg-white rounded-3xl p-5 shadow-lg border border-slate-200 relative overflow-hidden">
++              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
++                <Gift className="w-3.5 h-3.5 text-brand-blue" />
++                <span>{t.activeGoalProgress}</span>
++              </p>
+               
+               {redeemSuccess ? (
+-                <div className="py-6 text-center space-y-3">
+-                  <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto border border-green-200">
+-                    <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
+-                  </div>
+-                  <h4 className="text-xl font-black text-slate-800 uppercase">{t.redemptionSuccess}</h4>
+-                  <p className="text-xs text-slate-500 font-semibold">{t.redemptionSuccessSub}</p>
++                <div className="py-2 text-center space-y-1.5">
++                  <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto" />
++                  <h4 className="text-sm font-black text-slate-800 uppercase">{t.redemptionSuccess}</h4>
++                  <p className="text-[10px] text-slate-500 font-semibold">{t.redemptionSuccessSub}</p>
+                 </div>
+               ) : userData?.activeGoal ? (
+-                <div className="space-y-4">
++                <div className="space-y-3.5">
+                   {/* Goal Details Row */}
+                   <div className="flex gap-4 items-center">
+-                    <div className="w-20 h-20 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
++                    <div className="w-14 h-14 bg-slate-50 rounded-2xl border border-slate-250 overflow-hidden shrink-0 flex items-center justify-center shadow-sm">
+                       {userData.activeGoal.imageUrl ? (
+                         <img src={userData.activeGoal.imageUrl} alt={userData.activeGoal.name} className="w-full h-full object-cover" />
+                       ) : (
+-                        <ImageIcon className="w-8 h-8 text-slate-400" />
++                        <ImageIcon className="w-6 h-6 text-slate-400" />
+                       )}
+                     </div>
+-                    <div className="flex-1 space-y-1">
+-                      <h4 className="font-extrabold text-slate-800 text-base leading-tight">{userData.activeGoal.name}</h4>
+-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+-                        {t.target}: <span className="text-brand-blue">{userData.activeGoal.pointsRequired.toLocaleString()} {t.pts}</span>
++                    <div className="flex-1 min-w-0">
++                      <h4 className="font-extrabold text-slate-800 text-sm leading-snug truncate">{userData.activeGoal.name}</h4>
++                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
++                        {t.target}: <span className="text-brand-blue font-extrabold">{userData.activeGoal.pointsRequired.toLocaleString()} {t.pts}</span>
+                       </p>
+                     </div>
+                   </div>
+ 
+                   {/* Progress Tracker Info */}
+                   <div className="space-y-1.5">
+-                    <div className="flex justify-between text-xs font-bold text-slate-600 uppercase">
++                    <div className="flex justify-between text-[10px] font-extrabold text-slate-600 uppercase">
+                       <span>{Math.min(Math.round(((userData?.totalPoints || 0) / userData.activeGoal.pointsRequired) * 100), 100)}% {t.complete}</span>
+                       <span>{(userData?.totalPoints || 0).toLocaleString()} / {userData.activeGoal.pointsRequired.toLocaleString()} {t.pts}</span>
+                     </div>
+                     
+-                    {/* The Progress Bar - Nilkamal Blue #0093DD */}
+-                    <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden border border-slate-200 p-0.5">
++                    {/* Progress Bar */}
++                    <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200 p-0.5">
+                       <div 
+-                        className="h-full bg-brand-blue rounded-full transition-all duration-500 shadow-md shadow-brand-blue/15"
++                        className="h-full bg-brand-blue rounded-full transition-all duration-500 shadow-sm"
+                         style={{ width: `${Math.min(Math.round(((userData?.totalPoints || 0) / userData.activeGoal.pointsRequired) * 100), 100)}%` }}
+                       ></div>
+                     </div>
+                   </div>
+ 
+-                  {/* Redeem Button - pulsing large target */}
++                  {/* Action Button / Need Points Status */}
+                   {(userData?.totalPoints || 0) >= userData.activeGoal.pointsRequired ? (
+                     <button
+                       type="button"
+                       onClick={handleRedeemPrize}
+                       disabled={redeeming}
+-                      className="w-full py-4 px-6 bg-green-600 hover:bg-green-500 active:scale-[0.98] text-white rounded-2xl text-base font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all shadow-xl shadow-green-600/10 hover:shadow-green-600/20 animate-pulse border-2 border-white"
++                      className="w-full py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all animate-pulse shadow-md shadow-green-600/10 border border-green-500"
+                     >
+-                      {redeeming ? (
+-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+-                      ) : (
+-                        <>
+-                          <Award className="w-5 h-5" />
+-                          <span>{t.redeemPrizeNow}</span>
+-                        </>
+-                      )}
++                      {redeeming ? "..." : t.redeemPrizeNow}
+                     </button>
+                   ) : (
+-                    <div className="bg-amber-500/10 border-2 border-amber-400/40 rounded-2xl p-4 text-center shadow-lg shadow-amber-500/5 animate-blink-highlight">
+-                      <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest block mb-1">
+-                        {t.goalFocus}
+-                      </span>
+-                      <p className="text-sm font-extrabold text-slate-700 leading-snug">
+-                        {t.goalFocusText.split('{points}')[0]}
+-                        <span className="text-lg font-black text-brand-blue">
+-                          {(userData.activeGoal.pointsRequired - (userData?.totalPoints || 0)).toLocaleString()}
+-                        </span>
+-                        {t.goalFocusText.split('{points}')[1]}
+-                      </p>
+-                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">
+-                        {t.uploadMoreBills}
+-                      </p>
+-                    </div>
++                    <p className="text-[10px] font-bold text-amber-600 bg-amber-50 rounded-xl py-2 px-3 text-center border border-amber-100">
++                      ≡ƒÄ» You need <span className="font-extrabold">{(userData.activeGoal.pointsRequired - (userData?.totalPoints || 0)).toLocaleString()}</span> more points to claim this reward!
++                    </p>
+                   )}
+                 </div>
+               ) : (
+-                <div className="py-6 text-center text-slate-500 space-y-2">
+-                  <p className="text-sm font-bold">{t.noActiveGoal}</p>
+-                  <p className="text-xs text-slate-400">{t.noActiveGoalSub}</p>
++                <div className="text-center text-slate-500 py-3 bg-slate-50 rounded-2xl border border-dashed border-slate-350">
++                  <p className="text-xs font-black uppercase tracking-wide text-slate-600">{t.noActiveGoal}</p>
++                  <p className="text-[10px] text-slate-400 leading-snug mt-0.5 max-w-[240px] mx-auto">{language === 'en' ? 'Select a target reward from the rewards catalog to track your progress!' : 'αñ▓αñòαÑìαñ╖αÑìαñ» αñ¿αñ┐αñ░αÑìαñºαñ╛αñ░αñ┐αññ αñòαñ░αñ¿αÑç αñöαñ░ αñ¬αÑìαñ░αñùαññαñ┐ αñòαÑï αñƒαÑìαñ░αÑêαñò αñòαñ░αñ¿αÑç αñòαÑç αñ▓αñ┐αñÅ αñçαñ¿αñ╛αñ« αñòαÑêαñƒαñ▓αÑëαñù αñ╕αÑç αñÅαñò αñçαñ¿αñ╛αñ« αñÜαÑüαñ¿αÑçαñé!'}</p>
++                  <button
++                    type="button"
++                    onClick={() => setActiveTab('rewards')}
++                    className="mt-2.5 px-4 py-1.5 bg-brand-blue hover:bg-brand-blue/95 text-white text-[10px] font-black uppercase tracking-wider rounded-xl cursor-pointer active:scale-95 transition-all shadow-sm shadow-brand-blue/20"
++                  >
++                    Select Reward
++                  </button>
+                 </div>
+               )}
+             </div>
+ 
+-            {/* Upload Button - MASSIVE */}
++            {/* Quick Stats Grid */}
++            <div className="grid grid-cols-3 gap-2">
++              <div className="bg-white rounded-2xl p-3 border border-slate-200 text-center shadow-sm">
++                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block">Total Bills</span>
++                <span className="text-sm font-black text-slate-800 block mt-0.5">{claims.length}</span>
++              </div>
++              <div className="bg-white rounded-2xl p-3 border border-slate-200 text-center shadow-sm">
++                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block">Pending Review</span>
++                <span className="text-sm font-black text-amber-600 block mt-0.5">
++                  {claims.filter(c => c.status === 'pending').length}
++                </span>
++              </div>
++              <div className="bg-white rounded-2xl p-3 border border-slate-200 text-center shadow-sm">
++                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block">Redeemed</span>
++                <span className="text-sm font-black text-emerald-650 block mt-0.5">
++                  {redemptions.length}
++                </span>
++              </div>
++            </div>
++
++            {/* Upload Button */}
+             <button
+               onClick={() => setShowUploadModal(true)}
+-              className="w-full bg-brand-blue hover:bg-brand-blue/95 active:scale-[0.97] text-white rounded-3xl p-8 shadow-xl shadow-brand-blue/20 hover:shadow-brand-blue/30 transition-all flex flex-col items-center justify-center gap-4 cursor-pointer border-4 border-white mb-4"
++              className="w-full bg-brand-blue hover:bg-brand-blue/95 active:scale-[0.98] text-white rounded-3xl py-3.5 px-6 shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 cursor-pointer border-2 border-white relative overflow-hidden group"
+             >
+-              <div className="bg-white/20 p-4 rounded-full">
+-                <Plus className="w-14 h-14 text-white stroke-[3.5]" />
++              <div className="bg-white/20 p-2 rounded-xl">
++                <Plus className="w-5 h-5 text-white stroke-[3.5]" />
++              </div>
++              <div className="text-left">
++                <span className="text-sm font-black tracking-wide uppercase text-white block">
++                  {t.uploadNewBill}
++                </span>
++                <span className="text-[9px] font-bold text-blue-100 uppercase tracking-wider block -mt-0.5">
++                  Claim points instantly (αñ¬αÑëαñçαñéαñƒαÑìαñ╕ αñòαÑç αñ▓αñ┐αñÅ αñ¼αñ┐αñ▓ αñ¡αÑçαñ£αÑçαñé)
++                </span>
+               </div>
+-              <span className="text-2xl font-black tracking-wide uppercase text-white">
+-                {t.uploadNewBill}
+-              </span>
+-              <span className="text-xs font-semibold text-brand-blue-50/80 bg-brand-dark/20 px-4 py-1 rounded-full uppercase tracking-wider -mt-1">
+-                {t.tapToUpload}
+-              </span>
+             </button>
++
++            {/* Recent Uploads Section */}
++            <div className="space-y-2 mt-2">
++              <div className="flex justify-between items-center px-1">
++                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
++                  <FileText className="w-4 h-4 text-brand-blue" />
++                  <span>Recent Bills (αñ╣αñ╛αñ▓ αñòαÑç αñ¼αñ┐αñ▓)</span>
++                </h3>
++                {claims.length > 3 && (
++                  <button 
++                    onClick={() => setActiveTab('history')}
++                    className="text-[10px] font-bold text-brand-blue uppercase hover:underline"
++                  >
++                    View All
++                  </button>
++                )}
++              </div>
++
++              {loadingClaims ? (
++                <div className="bg-white rounded-2xl p-4 border border-slate-200 text-center text-slate-400 text-xs">
++                  Loading...
++                </div>
++              ) : claims.length === 0 ? (
++                <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center text-slate-500">
++                  <p className="text-xs font-bold">No bills uploaded yet</p>
++                  <p className="text-[10px] text-slate-400 mt-0.5">Upload a bill to earn points!</p>
++                </div>
++              ) : (
++                <div className="space-y-2">
++                  {claims.slice(0, 3).map((claim, idx) => (
++                    <div 
++                      key={claim.id || idx}
++                      className="bg-white rounded-2xl p-3 border border-slate-200 flex items-center justify-between shadow-sm"
++                    >
++                      <div className="flex items-center gap-3 min-w-0">
++                        <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
++                          {claim.imageUrl ? (
++                            <img src={claim.imageUrl} alt="Bill" className="w-full h-full object-cover" />
++                          ) : (
++                            <ImageIcon className="w-5 h-5 text-slate-400" />
++                          )}
++                        </div>
++                        <div className="min-w-0">
++                          <h4 className="font-extrabold text-slate-800 text-xs truncate">{claim.billNumber}</h4>
++                          <p className="text-[10px] text-slate-500 font-semibold truncate">
++                            Γé╣{claim.amount.toLocaleString()} | {claim.runningFeet || 0} RFT
++                          </p>
++                          {claim.place && (
++                            <p className="text-[9px] text-slate-400 font-bold uppercase truncate">≡ƒôì {claim.place}</p>
++                          )}
++                        </div>
++                      </div>
++                      
++                      <div className="text-right shrink-0">
++                        <span className="text-xs font-black text-slate-900 block">
++                          +{claim.points} Pts
++                        </span>
++                        {claim.status === 'approved' && (
++                          <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full border border-green-200">
++                            <CheckCircle2 className="w-2 h-2" />Approved
++                          </span>
++                        )}
++                        {claim.status === 'rejected' && (
++                          <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full border border-red-200">
++                            <AlertCircle className="w-2 h-2" />Rejected
++                          </span>
++                        )}
++                        {claim.status === 'pending' && (
++                          <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">
++                            <Clock className="w-2 h-2 animate-pulse" />Pending
++                          </span>
++                        )}
++                      </div>
++                    </div>
++                  ))}
++                </div>
++              )}
++            </div>
++
++            {/* Latest Announcements Section */}
++            <div className="space-y-2 mt-2">
++              <div className="flex justify-between items-center px-1">
++                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
++                  <Megaphone className="w-4 h-4 text-brand-blue" />
++                  <span>Latest Updates (αñ¿αñ╡αÑÇαñ¿αññαñ« αñàαñ¬αñíαÑçαñƒ)</span>
++                </h3>
++                {announcements.length > 2 && (
++                  <button 
++                    onClick={() => setActiveTab('updates')}
++                    className="text-[10px] font-bold text-brand-blue uppercase hover:underline"
++                  >
++                    View All
++                  </button>
++                )}
++              </div>
++
++              {loadingAnnouncements ? (
++                <div className="bg-white rounded-2xl p-4 border border-slate-200 text-center text-slate-400 text-xs">
++                  Loading...
++                </div>
++              ) : announcements.length === 0 ? (
++                <div className="bg-white rounded-2xl p-6 border border-slate-200 text-center text-slate-500">
++                  <p className="text-xs font-bold text-slate-500">No announcements yet</p>
++                </div>
++              ) : (
++                <div className="space-y-2">
++                  {announcements.slice(0, 2).map((ann) => (
++                    <div 
++                      key={ann.id}
++                      className="bg-white rounded-2xl p-3 border border-slate-200 flex gap-3 items-start shadow-sm"
++                    >
++                      {ann.imageUrl && (
++                        <div className="w-12 h-12 rounded-xl border border-slate-200 overflow-hidden shrink-0">
++                          <img src={ann.imageUrl} alt={ann.title} className="w-full h-full object-cover" />
++                        </div>
++                      )}
++                      <div className="flex-1 min-w-0">
++                        <h4 className="font-extrabold text-slate-800 text-xs truncate">{ann.title}</h4>
++                        <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2 leading-snug">{ann.description}</p>
++                      </div>
++                    </div>
++                  ))}
++                </div>
++              )}
++            </div>
+           </>
+         )}
+ 
+         {activeTab === 'rewards' && (
+           /* Rewards Catalog */
+           <div className="space-y-3">
+-            <h3 className="text-lg font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
++            <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+               <Award className="w-5 h-5 text-brand-blue" />
+               <span>{t.rewardsCatalog}</span>
+             </h3>
+@@ -729,32 +1157,32 @@ export default function ContractorDashboard() {
+                 <p className="text-xs text-slate-400">{t.askAdminRewards}</p>
+               </div>
+             ) : (
+-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
++              <div className="grid grid-cols-2 gap-3">
+                 {goals.map((g) => {
+                   const isSelectedGoal = userData?.activeGoal && userData.activeGoal.name === g.name;
+                   return (
+                     <div key={g.id || g.name} className="bg-white rounded-2xl overflow-hidden border border-slate-200 flex flex-col shadow-sm">
+                       {/* Goal Image */}
+-                      <div className="h-40 bg-slate-50 border-b border-slate-150 flex items-center justify-center overflow-hidden relative">
++                      <div className="h-28 bg-slate-50 border-b border-slate-150 flex items-center justify-center overflow-hidden relative">
+                         {g.imageUrl ? (
+                           <img src={g.imageUrl} alt={g.name} className="w-full h-full object-cover" />
+                         ) : (
+-                          <ImageIcon className="w-10 h-10 text-slate-400" />
++                          <ImageIcon className="w-8 h-8 text-slate-400" />
+                         )}
+-                        <span className="absolute top-2 right-2 bg-brand-dark/85 backdrop-blur-sm text-brand-blue text-[10px] font-black px-2.5 py-1 rounded-full border border-brand-blue/30 uppercase tracking-wider">
++                        <span className="absolute top-2 right-2 bg-brand-dark/85 backdrop-blur-sm text-brand-blue text-[9px] font-black px-2 py-0.5 rounded-full border border-brand-blue/30 uppercase tracking-wider">
+                           {g.pointsRequired.toLocaleString()} {t.pts}
+                         </span>
+                       </div>
+                       {/* Goal Info */}
+-                      <div className="p-4 flex-1 flex flex-col justify-between gap-3">
++                      <div className="p-3 flex-1 flex flex-col justify-between gap-2">
+                         <div>
+-                          <h4 className="font-extrabold text-slate-800 text-sm leading-snug line-clamp-2">{g.name}</h4>
++                          <h4 className="font-extrabold text-slate-800 text-xs leading-tight line-clamp-2">{g.name}</h4>
+                         </div>
+                         <button
+                           type="button"
+                           onClick={() => handleSelectGoal(g)}
+                           disabled={isSelectedGoal}
+-                          className={`w-full py-2.5 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
++                          className={`w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                             isSelectedGoal
+                               ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10 pointer-events-none'
+                               : 'bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95'
+@@ -775,7 +1203,7 @@ export default function ContractorDashboard() {
+           <>
+             {/* Past Claims History Section */}
+             <div className="space-y-3">
+-              <h3 className="text-lg font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
++              <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                 <FileText className="w-5 h-5 text-brand-blue" />
+                 <span>{t.yourSubmittedBills}</span>
+               </h3>
+@@ -790,28 +1218,31 @@ export default function ContractorDashboard() {
+                   <p className="text-xs text-slate-400 mt-1">{t.submitFirstBill}</p>
+                 </div>
+               ) : (
+-                <div className="space-y-3">
++                <div className="space-y-2">
+                   {claims.slice(0, 10).map((claim, idx) => (
+                     <div 
+                       key={claim.id || idx}
+-                      className="bg-white rounded-2xl p-4 border border-slate-200 flex items-center justify-between shadow-sm transition-all hover:shadow-md"
++                      className="bg-white rounded-2xl p-3 border border-slate-200 flex items-center justify-between shadow-sm transition-all hover:shadow-md"
+                     >
+-                      <div className="flex items-center gap-3">
++                      <div className="flex items-center gap-3 min-w-0">
+                         {/* Tiny Bill Photo Thumbnail */}
+-                        <div className="w-12 h-12 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
++                        <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                           {claim.imageUrl ? (
+                             <img src={claim.imageUrl} alt="Bill" className="w-full h-full object-cover" />
+                           ) : (
+                             <ImageIcon className="w-5 h-5 text-slate-400" />
+                           )}
+                         </div>
+-                        <div>
+-                          <h4 className="font-extrabold text-slate-800 text-sm">{claim.billNumber}</h4>
+-                          <p className="text-xs text-slate-500 font-semibold">
++                        <div className="min-w-0">
++                          <h4 className="font-extrabold text-slate-800 text-xs truncate">{claim.billNumber}</h4>
++                          <p className="text-[10px] text-slate-500 font-semibold truncate">
+                             {t.amt}: Γé╣{claim.amount.toLocaleString()} | {claim.runningFeet || 0} {t.rft}
+                           </p>
++                          {claim.place && (
++                            <p className="text-[9px] text-slate-400 font-bold uppercase truncate">≡ƒôì {claim.place}</p>
++                          )}
+                           {claim.billDate && (
+-                            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
++                            <p className="text-[9px] text-slate-400 font-semibold mt-0.5">
+                               {t.date}: {formatDate(claim.billDate)}
+                             </p>
+                           )}
+@@ -819,22 +1250,22 @@ export default function ContractorDashboard() {
+                       </div>
+                       
+                       {/* Status & Point Earnings */}
+-                      <div className="text-right">
+-                        <span className="text-sm font-black text-slate-900 block">
++                      <div className="text-right shrink-0">
++                        <span className="text-xs font-black text-slate-900 block">
+                           +{claim.points} {t.pts}
+                         </span>
+                         {claim.status === 'approved' && (
+-                          <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
++                          <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full border border-green-200">
+                             <CheckCircle2 className="w-2.5 h-2.5" />{t.approved}
+                           </span>
+                         )}
+                         {claim.status === 'rejected' && (
+-                          <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
++                          <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full border border-red-200">
+                             <AlertCircle className="w-2.5 h-2.5" />{t.rejected}
+                           </span>
+                         )}
+                         {claim.status === 'pending' && (
+-                          <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
++                          <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">
+                             <Clock className="w-2.5 h-2.5" />{t.waiting}
+                           </span>
+                         )}
+@@ -847,7 +1278,7 @@ export default function ContractorDashboard() {
+ 
+             {/* Redemption History */}
+             <div className="space-y-3 mt-4">
+-              <h3 className="text-lg font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
++              <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                 <Clock className="w-5 h-5 text-brand-blue" />
+                 <span>{t.redemptionHistory}</span>
+               </h3>
+@@ -862,28 +1293,28 @@ export default function ContractorDashboard() {
+                   <p className="text-xs text-slate-400 mt-1">{t.completeGoalRedeem}</p>
+                 </div>
+               ) : (
+-                <div className="space-y-3">
++                <div className="space-y-2">
+                   {redemptions.map((r, idx) => (
+                     <div 
+                       key={r.id || idx}
+-                      className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col gap-3 shadow-sm"
++                      className="bg-white rounded-2xl p-3 border border-slate-200 flex flex-col gap-2 shadow-sm"
+                     >
+                       <div className="flex items-center justify-between">
+-                        <div className="space-y-1">
+-                          <h4 className="font-extrabold text-slate-800 text-sm leading-tight">{r.goalName}</h4>
+-                          <p className="text-[10px] text-slate-400 font-bold uppercase">
++                        <div className="space-y-0.5 min-w-0">
++                          <h4 className="font-extrabold text-slate-800 text-xs leading-tight truncate">{r.goalName}</h4>
++                          <p className="text-[9px] text-slate-400 font-bold uppercase truncate">
+                             {t.spent}: {r.pointsSpent.toLocaleString()} {t.pts} | {t.date}: {formatDate(r.timestamp)}
+                           </p>
+                         </div>
+                         
+                         {/* Status Badge */}
+-                        <div>
++                        <div className="shrink-0">
+                           {r.status === 'delivered' ? (
+-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
++                            <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full border border-green-200">
+                               <CheckCircle2 className="w-2.5 h-2.5" />{t.delivered}
+                             </span>
+                           ) : (
+-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
++                            <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">
+                               <Clock className="w-2.5 h-2.5" />{t.requested}
+                             </span>
+                           )}
+@@ -892,11 +1323,11 @@ export default function ContractorDashboard() {
+ 
+                       {/* Delivery Photo Link / Thumbnail */}
+                       {r.deliveryImageUrl && (
+-                        <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-150">
++                        <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-150">
+                           <button
+                             type="button"
+                             onClick={() => setSelectedDeliveryProof(r.deliveryImageUrl)}
+-                            className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 cursor-zoom-in relative group"
++                            className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 cursor-zoom-in relative group"
+                           >
+                             <img src={r.deliveryImageUrl} alt="Delivery Proof Thumbnail" className="w-full h-full object-cover" />
+                             <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all text-white text-[8px] font-bold">
+@@ -904,11 +1335,11 @@ export default function ContractorDashboard() {
+                             </div>
+                           </button>
+                           <div>
+-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">{t.handedOver}</span>
++                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block">{t.handedOver}</span>
+                             <button
+                               type="button"
+                               onClick={() => setSelectedDeliveryProof(r.deliveryImageUrl)}
+-                              className="text-[10px] font-black text-brand-blue uppercase hover:underline cursor-pointer"
++                              className="text-[9px] font-black text-brand-blue uppercase hover:underline cursor-pointer"
+                             >
+                               {t.viewDeliveryPhoto}
+                             </button>
+@@ -922,41 +1353,95 @@ export default function ContractorDashboard() {
+             </div>
+           </>
+         )}
++
++        {activeTab === 'updates' && (
++          <div className="space-y-4">
++            <h3 className="text-base font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
++              <Megaphone className="w-5 h-5 text-brand-blue" />
++              <span>{language === 'en' ? 'Announcements & Updates' : 'αñÿαÑïαñ╖αñúαñ╛αñÅαñé αñöαñ░ αñàαñ¬αñíαÑçαñƒ'}</span>
++            </h3>
++            
++            {loadingAnnouncements ? (
++              <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-400 text-sm font-semibold">
++                {language === 'en' ? 'Loading updates...' : 'αñàαñ¬αñíαÑçαñƒ αñ▓αÑïαñí αñ╣αÑï αñ░αñ╣αÑç αñ╣αÑêαñé...'}
++              </div>
++            ) : announcements.length === 0 ? (
++              <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-500">
++                <p className="text-base font-bold">{language === 'en' ? 'No updates yet.' : 'αñàαñ¡αÑÇ αññαñò αñòαÑïαñê αñàαñ¬αñíαÑçαñƒ αñ¿αñ╣αÑÇαñéαÑñ'}</p>
++                <p className="text-xs text-slate-400 mt-1">{language === 'en' ? 'Check back later for company news!' : 'αñòαñéαñ¬αñ¿αÑÇ αñ╕αñ«αñ╛αñÜαñ╛αñ░ αñòαÑç αñ▓αñ┐αñÅ αñ¼αñ╛αñª αñ«αÑçαñé αñªαÑïαñ¼αñ╛αñ░αñ╛ αñ£αñ╛αñéαñÜαÑçαñé!'}</p>
++              </div>
++            ) : (
++              <div className="space-y-4">
++                {announcements.map((ann, idx) => (
++                  <div key={ann.id || idx} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm flex flex-col">
++                    {ann.imageUrl && (
++                      <div className="h-40 bg-slate-100 overflow-hidden">
++                        <img src={ann.imageUrl} alt={ann.title} className="w-full h-full object-cover" />
++                      </div>
++                    )}
++                    <div className="p-4 space-y-2">
++                      <div className="flex justify-between items-start gap-2">
++                        <h4 className="font-extrabold text-slate-800 text-sm leading-tight">{ann.title}</h4>
++                        <span className="text-[9px] text-slate-400 font-bold shrink-0">
++                          {formatDate(ann.timestamp)}
++                        </span>
++                      </div>
++                      <p className="text-xs text-slate-600 font-semibold whitespace-pre-wrap leading-relaxed">
++                        {ann.description}
++                      </p>
++                    </div>
++                  </div>
++                ))}
++              </div>
++            )}
++          </div>
++        )}
+       </main>
+ 
+       {/* Sticky Bottom Tab Bar */}
+-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-250 py-2.5 px-4 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-25 flex justify-around max-w-md mx-auto rounded-t-3xl">
++      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-250 py-2 px-4 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-25 flex justify-around max-w-md mx-auto rounded-t-2xl">
+         <button
+           type="button"
+           onClick={() => setActiveTab('dashboard')}
+-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer active:scale-95 ${
++          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all cursor-pointer active:scale-95 ${
+             activeTab === 'dashboard' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
+           }`}
+         >
+-          <LayoutDashboard className="w-5 h-5" />
+-          <span className="text-[10px] uppercase tracking-wider font-extrabold">{t.tabDashboard}</span>
++          <LayoutDashboard className="w-4 h-4" />
++          <span className="text-[9px] uppercase tracking-wider font-extrabold">{t.tabDashboard}</span>
+         </button>
+         
+         <button
+           type="button"
+           onClick={() => setActiveTab('rewards')}
+-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer active:scale-95 ${
++          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all cursor-pointer active:scale-95 ${
+             activeTab === 'rewards' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
+           }`}
+         >
+-          <Gift className="w-5 h-5" />
+-          <span className="text-[10px] uppercase tracking-wider font-extrabold">{t.tabRewards}</span>
++          <Gift className="w-4 h-4" />
++          <span className="text-[9px] uppercase tracking-wider font-extrabold">{t.tabRewards}</span>
+         </button>
+ 
+         <button
+           type="button"
+           onClick={() => setActiveTab('history')}
+-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer active:scale-95 ${
++          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all cursor-pointer active:scale-95 ${
+             activeTab === 'history' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
+           }`}
+         >
+-          <History className="w-5 h-5" />
+-          <span className="text-[10px] uppercase tracking-wider font-extrabold">{t.tabHistory}</span>
++          <History className="w-4 h-4" />
++          <span className="text-[9px] uppercase tracking-wider font-extrabold">{t.tabHistory}</span>
++        </button>
++
++        <button
++          type="button"
++          onClick={() => setActiveTab('updates')}
++          className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all cursor-pointer active:scale-95 ${
++            activeTab === 'updates' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
++          }`}
++        >
++          <Megaphone className="w-4 h-4" />
++          <span className="text-[9px] uppercase tracking-wider font-extrabold">{t.tabUpdates}</span>
+         </button>
+       </div>
+ 
+@@ -966,56 +1451,76 @@ export default function ContractorDashboard() {
+           <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+             
+             {/* Modal Header */}
+-            <div className="bg-brand-dark text-white p-5 flex justify-between items-center border-b border-slate-800">
+-              <h3 className="text-lg font-black uppercase tracking-wider">{t.newBillUpload}</h3>
++            <div className="bg-brand-dark text-white p-4 flex justify-between items-center border-b border-slate-800">
++              <h3 className="text-base font-black uppercase tracking-wider">{t.newBillUpload}</h3>
+               <button 
+                 onClick={() => setShowUploadModal(false)}
+-                className="p-1.5 bg-slate-800 rounded-full hover:bg-slate-700 text-white cursor-pointer active:scale-90"
++                className="p-1 rounded-full hover:bg-slate-700 text-white cursor-pointer active:scale-90"
+               >
+-                <X className="w-6 h-6" />
++                <X className="w-5 h-5" />
+               </button>
+             </div>
+ 
+             {/* Modal Body / Form */}
+-            <form onSubmit={handleSubmitClaim} className="p-6 overflow-y-auto space-y-4 flex-1">
++            <form onSubmit={handleSubmitClaim} className="p-4 overflow-y-auto space-y-3 flex-1">
+               {submitSuccess ? (
+                 <div className="py-12 text-center space-y-4">
+-                  <div className="w-20 h-20 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto border-2 border-green-200">
+-                    <CheckCircle2 className="w-12 h-12 stroke-[2.5]" />
++                  <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto border-2 border-green-200">
++                    <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
+                   </div>
+-                  <h4 className="text-2xl font-black text-slate-800 uppercase">{t.submitted}</h4>
+-                  <p className="text-sm font-semibold text-slate-500">{t.waitApproval}</p>
++                  <h4 className="text-xl font-black text-slate-800 uppercase">{t.submitted}</h4>
++                  <p className="text-xs font-semibold text-slate-500">{t.waitApproval}</p>
+                 </div>
+               ) : (
+                 <>
++                  {/* Hindi Voice Recognition Control */}
++                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-100 rounded-xl p-3 flex items-center justify-between">
++                    <div className="flex items-center gap-2">
++                      <div className="w-8 h-8 bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-md animate-pulse">
++                        <Mic className="w-4 h-4" />
++                      </div>
++                      <div>
++                        <span className="text-[10px] font-black text-indigo-950 uppercase tracking-wide block">Hindi Voice Input</span>
++                        <span className="text-[8px] text-indigo-700 font-bold block">αñ¼αÑïαñ▓αñòαñ░ αñ¼αñ┐αñ▓ αñòαÑÇ αñ£αñ╛αñ¿αñòαñ╛αñ░αÑÇ αñ¡αñ░αÑçαñé</span>
++                      </div>
++                    </div>
++                    <button
++                      type="button"
++                      onClick={startVoiceRecognition}
++                      className="px-3 py-1.5 bg-brand-blue hover:bg-brand-blue/95 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 active:scale-95 cursor-pointer shadow-sm shadow-brand-blue/20"
++                    >
++                      <Mic className="w-3 h-3" /> Start
++                    </button>
++                  </div>
++
+                   {/* Photo Upload Area - COMPACT */}
+                   <div>
+-                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
++                    <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">
+                       {t.takePhoto}
+                     </label>
+                     <div className="relative">
+                       {billImagePreview ? (
+-                        <div className="relative rounded-xl overflow-hidden border border-brand-blue max-h-28 flex justify-center bg-slate-900">
+-                          <img src={billImagePreview} alt="Bill Preview" className="max-h-28 object-contain" />
++                        <div className="relative rounded-xl overflow-hidden border border-brand-blue max-h-24 flex justify-center bg-slate-900">
++                          <img src={billImagePreview} alt="Bill Preview" className="max-h-24 object-contain" />
+                           <button
+                             type="button"
+                             onClick={() => {
+                               setBillImage(null);
+                               setBillImagePreview(null);
+                             }}
+-                            className="absolute top-2 right-2 bg-red-600 text-white p-1 rounded-full shadow-lg cursor-pointer"
++                            className="absolute top-1.5 right-1.5 bg-red-600 text-white p-1 rounded-full shadow-lg cursor-pointer"
+                           >
+-                            <X className="w-4 h-4" />
++                            <X className="w-3.5 h-3.5" />
+                           </button>
+                         </div>
+                       ) : (
+-                        <label className="w-full h-20 border-2 border-dashed border-slate-300 hover:border-brand-blue rounded-xl flex flex-row items-center justify-center gap-3 cursor-pointer transition-all bg-slate-50 hover:bg-brand-blue/5 p-3">
+-                          <Camera className="w-6 h-6 text-slate-400 stroke-[2]" />
++                        <label className="w-full h-14 border-2 border-dashed border-slate-350 hover:border-brand-blue rounded-xl flex flex-row items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 hover:bg-brand-blue/5 p-2">
++                          <Camera className="w-5 h-5 text-slate-400 stroke-[2]" />
+                           <div className="text-left">
+-                            <span className="text-xs font-black text-slate-600 uppercase tracking-wide block">
++                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-wide block">
+                               {t.openCamera}
+                             </span>
+-                            <span className="text-[10px] text-slate-400 block">{t.imageFormat}</span>
++                            <span className="text-[8px] text-slate-400 block">{t.imageFormat}</span>
+                           </div>
+                           <input
+                             type="file"
+@@ -1029,9 +1534,9 @@ export default function ContractorDashboard() {
+                     </div>
+                   </div>
+ 
+-                  {/* Running Feet - HUGE INPUT (Point Determinant) */}
++                  {/* Running Feet - COMPACT INPUT */}
+                   <div>
+-                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
++                    <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">
+                       {t.enterRft}
+                     </label>
+                     <div className="relative">
+@@ -1040,26 +1545,26 @@ export default function ContractorDashboard() {
+                         inputMode="decimal"
+                         value={runningFeet}
+                         onChange={(e) => setRunningFeet(e.target.value)}
+-                        className="w-full px-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xl font-black focus:outline-none transition-all placeholder:text-slate-300"
+-                        placeholder="0.00"
++                        className="w-full px-3 py-2 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-base font-black focus:outline-none transition-all placeholder:text-slate-300"
++                        placeholder="0"
+                         required
+                       />
+                     </div>
+                     {runningFeet && (
+-                      <div className="mt-2 bg-brand-blue/10 border border-brand-blue/20 rounded-xl p-2.5 text-center shadow-inner">
+-                        <span className="text-[9px] font-black text-brand-blue uppercase tracking-widest block mb-0.5">{t.estPoints}</span>
+-                        <span className="text-xl font-black text-slate-900 block">+{Math.round(parseFloat(runningFeet) || 0)} {t.pts}</span>
++                      <div className="mt-1 bg-brand-blue/5 border border-brand-blue/15 rounded-lg py-1 px-2 flex justify-between items-center">
++                        <span className="text-[8px] font-black text-brand-blue uppercase tracking-widest">{t.estPoints}</span>
++                        <span className="text-xs font-black text-slate-900">+{Math.round(parseFloat(runningFeet) || 0)} {t.pts}</span>
+                       </div>
+                     )}
+                   </div>
+ 
+-                  {/* Bill Amount - HUGE INPUT */}
++                  {/* Bill Amount - COMPACT INPUT */}
+                   <div>
+-                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
++                    <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">
+                       {t.enterAmt}
+                     </label>
+                     <div className="relative">
+-                      <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-xl font-black text-slate-400">
++                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-base font-black text-slate-400">
+                         Γé╣
+                       </span>
+                       <input
+@@ -1067,38 +1572,52 @@ export default function ContractorDashboard() {
+                         inputMode="decimal"
+                         value={amount}
+                         onChange={(e) => setAmount(e.target.value)}
+-                        className="w-full pl-10 pr-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xl font-black focus:outline-none transition-all placeholder:text-slate-300"
++                        className="w-full pl-7 pr-3 py-2 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-base font-black focus:outline-none transition-all placeholder:text-slate-300"
+                         placeholder="0.00"
+                         required
+                       />
+                     </div>
+                   </div>
+ 
++                  {/* Place / Location - OPTIONAL */}
++                  <div>
++                    <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">
++                      Place / Location (αñ╕αÑìαñÑαñ╛αñ¿ - αñ╡αÑêαñòαñ▓αÑìαñ¬αñ┐αñò)
++                    </label>
++                    <input
++                      type="text"
++                      value={place}
++                      onChange={(e) => setPlace(e.target.value)}
++                      className="w-full px-3 py-2 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xs font-extrabold focus:outline-none transition-all placeholder:text-slate-300"
++                      placeholder="e.g. Kashipur"
++                    />
++                  </div>
++
+                   {/* Bill Date - REQUIRED */}
+                   <div>
+-                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
++                    <label className="block text-[10px] font-extrabold text-slate-500 uppercase mb-1">
+                       {t.billDateLabel}
+                     </label>
+                     <input
+                       type="date"
+                       value={billDate}
+                       onChange={(e) => setBillDate(e.target.value)}
+-                      className="w-full px-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 font-bold focus:outline-none transition-all"
++                      className="w-full px-3 py-2 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xs font-bold focus:outline-none transition-all"
+                       required
+                     />
+                   </div>
+ 
+-                  {/* Submit Button - HUGE */}
++                  {/* Submit Button */}
+                   <button
+                     type="submit"
+                     disabled={uploading}
+-                    className="w-full bg-green-600 hover:bg-green-500 active:scale-95 text-white font-black py-3.5 px-6 rounded-xl shadow-xl shadow-green-700/10 hover:shadow-green-700/20 text-base uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-75"
++                    className="w-full bg-green-600 hover:bg-green-500 active:scale-95 text-white font-black py-2.5 px-4 rounded-xl shadow-md text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-75"
+                   >
+                     {uploading ? (
+-                      <div className="w-7 h-7 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
++                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                     ) : (
+                       <>
+-                        <CheckCircle2 className="w-6 h-6" />
++                        <CheckCircle2 className="w-4 h-4" />
+                         <span>{t.sendBillNow}</span>
+                       </>
+                     )}
+@@ -1110,26 +1629,54 @@ export default function ContractorDashboard() {
+         </div>
+       )}
+ 
++      {/* Voice Input Listening Overlay */}
++      {isListening && (
++        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[999] flex flex-col items-center justify-center p-6 text-white text-center">
++          <div className="relative mb-8">
++            <div className="absolute inset-0 bg-brand-blue/30 rounded-full blur-2xl animate-pulse scale-150"></div>
++            <div className="w-20 h-20 bg-indigo-600 rounded-full flex items-center justify-center border-4 border-white shadow-xl animate-pulse relative z-10">
++              <Mic className="w-8 h-8 text-white" />
++            </div>
++            {/* soundwave ripples */}
++            <div className="absolute -inset-2 border-2 border-indigo-400/40 rounded-full animate-ping"></div>
++            <div className="absolute -inset-4 border-2 border-indigo-400/20 rounded-full animate-ping"></div>
++          </div>
++          
++          <h3 className="text-lg font-black uppercase tracking-wider mb-2">Listening... (αñ╕αÑüαñ¿ αñ░αñ╣αñ╛ αñ╣αÑéαñü...)</h3>
++          <p className="text-xs text-slate-405 max-w-xs leading-relaxed mb-6 font-semibold bg-slate-900/60 px-4 py-2.5 rounded-xl border border-slate-800">
++            αñëαñªαñ╛αñ╣αñ░αñú: "280 ft mal lia hai kasipur ka hai party, 20 tarik ko"
++          </p>
++
++          <button
++            type="button"
++            onClick={() => setIsListening(false)}
++            className="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all shadow-lg"
++          >
++            Cancel
++          </button>
++        </div>
++      )}
++
+       {/* Delivery Photo Viewer Modal */}
+       {selectedDeliveryProof && (
+         <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+           <div className="bg-white w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+-            <div className="bg-brand-dark text-white p-5 flex justify-between items-center">
+-              <h4 className="font-extrabold text-base uppercase tracking-wider">{t.proofOfDelivery}</h4>
++            <div className="bg-brand-dark text-white p-4 flex justify-between items-center">
++              <h4 className="font-extrabold text-xs uppercase tracking-wider">{t.proofOfDelivery}</h4>
+               <button 
+                 onClick={() => setSelectedDeliveryProof(null)}
+-                className="p-1.5 bg-slate-800 rounded-full hover:bg-slate-700 text-white cursor-pointer active:scale-90"
++                className="p-1 bg-slate-800 rounded-full hover:bg-slate-700 text-white cursor-pointer active:scale-90"
+               >
+-                <X className="w-5 h-5" />
++                <X className="w-4 h-4" />
+               </button>
+             </div>
+-            <div className="p-6 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-50 min-h-[300px]">
++            <div className="p-4 overflow-y-auto flex-1 flex flex-col items-center justify-center bg-slate-50 min-h-[250px]">
+               <img 
+                 src={selectedDeliveryProof} 
+                 alt="Delivery Proof" 
+-                className="max-h-[50vh] w-full object-contain rounded-2xl border border-slate-200 shadow-sm"
++                className="max-h-[45vh] w-full object-contain rounded-2xl border border-slate-200 shadow-sm"
+               />
+-              <p className="mt-4 text-xs text-slate-500 font-semibold uppercase tracking-wider text-center">
++              <p className="mt-3 text-[10px] text-slate-500 font-semibold uppercase tracking-wider text-center">
+                 {t.proofOfDeliverySub}
+               </p>
+             </div>

@@ -1,9 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   signOut as firebaseSignOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 const AuthContext = createContext();
@@ -23,6 +23,7 @@ export function AuthProvider({ children }) {
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const userDocSubRef = useRef(null);
   
 
 
@@ -104,6 +105,35 @@ export function AuthProvider({ children }) {
     return userData;
   };
 
+  // Listen to mock DB updates to reload state instantly in Mock Mode
+  useEffect(() => {
+    const handleMockDbUpdate = () => {
+      const isMockMode = !isFirebaseConfigured() || user?.isMock;
+      if (isMockMode) {
+        console.log("Mock DB update event received, reloading local state...");
+        // Reload points
+        const rameshPts = parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10);
+        setMockContractorPoints(rameshPts);
+        
+        // Reload user data
+        const savedMockUser = localStorage.getItem('nilkamal_mock_user');
+        if (savedMockUser) {
+          const parsed = JSON.parse(savedMockUser);
+          if (parsed.role === 'contractor') {
+            parsed.totalPoints = rameshPts;
+            parsed.activeGoal = getMockActiveGoal();
+          }
+          setUserData(parsed);
+        }
+      }
+    };
+    
+    window.addEventListener('nilkamal_mock_db_update', handleMockDbUpdate);
+    return () => {
+      window.removeEventListener('nilkamal_mock_db_update', handleMockDbUpdate);
+    };
+  }, [user]);
+
   useEffect(() => {
     // Initialize mock goals database
     const savedGoals = localStorage.getItem('nilkamal_mock_goals');
@@ -161,6 +191,12 @@ export function AuthProvider({ children }) {
     // Firebase Auth Listener
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
+      // Clean up previous user snapshot subscription
+      if (userDocSubRef.current) {
+        userDocSubRef.current();
+        userDocSubRef.current = null;
+      }
+
       if (firebaseUser) {
         // Clear mobile/mock sessions when a firebaseUser is logged in directly
         localStorage.removeItem('nilkamal_logged_in_mobile_uid');
@@ -171,9 +207,7 @@ export function AuthProvider({ children }) {
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userDocSnap = await getDoc(userDocRef);
           
-          if (userDocSnap.exists()) {
-            setUserData(userDocSnap.data());
-          } else {
+          if (!userDocSnap.exists()) {
             // Self-healing migration / matching by phone number
             let matchedData = null;
             let matchedId = null;
@@ -193,7 +227,6 @@ export function AuthProvider({ children }) {
               // Copy data to new UID and delete old document
               const updatedData = { ...matchedData, uid: firebaseUser.uid };
               await setDoc(userDocRef, updatedData);
-              setUserData(updatedData);
 
               if (matchedId !== firebaseUser.uid) {
                 // Delete old doc
@@ -227,9 +260,17 @@ export function AuthProvider({ children }) {
                 mobileNumber: firebaseUser.phoneNumber ? firebaseUser.phoneNumber.replace(/\D/g, '').slice(-10) : ''
               };
               await setDoc(userDocRef, defaultData);
-              setUserData(defaultData);
             }
           }
+
+          // Set up real-time subscription
+          userDocSubRef.current = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              setUserData(docSnap.data());
+            }
+          }, (err) => {
+            console.error("Error subscribing to Firebase user document:", err);
+          });
         } catch (err) {
           console.error("Error fetching user data from Firestore:", err);
           setError("Failed to fetch user profile. Firestore permissions might need checking.");
@@ -258,7 +299,14 @@ export function AuthProvider({ children }) {
             if (userDocSnap.exists()) {
               const data = { uid: userDocSnap.id, ...userDocSnap.data() };
               setUser({ uid: mobileUid, email: data.email || `${data.mobileNumber}@nilkamal.com` });
-              setUserData(data);
+              
+              userDocSubRef.current = onSnapshot(userDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                  setUserData({ uid: docSnap.id, ...docSnap.data() });
+                }
+              }, (err) => {
+                console.error("Error subscribing to mobile user document:", err);
+              });
             } else {
               localStorage.removeItem('nilkamal_logged_in_mobile_uid');
               setUser(null);
@@ -277,7 +325,13 @@ export function AuthProvider({ children }) {
       setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (userDocSubRef.current) {
+        userDocSubRef.current();
+        userDocSubRef.current = null;
+      }
+    };
   }, []);
 
 
@@ -286,6 +340,11 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     setError('');
     setLoading(true);
+
+    if (userDocSubRef.current) {
+      userDocSubRef.current();
+      userDocSubRef.current = null;
+    }
 
     // Clear all persisted sessions
     localStorage.removeItem('nilkamal_logged_in_mobile_uid');
@@ -345,6 +404,7 @@ export function AuthProvider({ children }) {
         setMockContractorPoints(updatedPoints);
       }
 
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return { success: true, newPoints: updatedPoints };
     }
 
@@ -370,6 +430,7 @@ export function AuthProvider({ children }) {
       const updated = current + pointsToAdd;
       localStorage.setItem('nilkamal_mock_contractor_points', updated.toString());
       setMockContractorPoints(updated);
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return { success: true, newPoints: updated };
     }
   };
@@ -400,6 +461,7 @@ export function AuthProvider({ children }) {
       }
 
       setUserData(prev => prev ? { ...prev, activeGoal } : null);
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return { success: true };
     }
 
@@ -419,6 +481,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('nilkamal_mock_active_goal');
       }
       setUserData(prev => prev ? { ...prev, activeGoal } : null);
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return { success: true };
     }
   };
@@ -557,6 +620,7 @@ export function AuthProvider({ children }) {
       localStorage.setItem('nilkamal_mock_user', JSON.stringify(newContractor));
       setMockContractorPoints(0);
       setLoading(false);
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return { success: true, role: 'contractor' };
     }
 
@@ -608,6 +672,7 @@ export function AuthProvider({ children }) {
       if (userData && (userData.uid === contractorId || contractorId === 'mock-contractor-uid')) {
         setUserData(prev => prev ? { ...prev, lastTransaction } : null);
       }
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return { success: true };
     }
 
@@ -624,6 +689,10 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const triggerMockDbUpdate = () => {
+    window.dispatchEvent(new Event('nilkamal_mock_db_update'));
+  };
+
   const value = {
     user,
     userData: getActiveUserData(),
@@ -637,7 +706,8 @@ export function AuthProvider({ children }) {
     setUserData,
     loginWithOtp,
     registerContractor,
-    updateContractorTransaction
+    updateContractorTransaction,
+    triggerMockDbUpdate
   };
 
   return (

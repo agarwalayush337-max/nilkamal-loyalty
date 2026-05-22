@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, Check, X, ShieldAlert, Award, FileText, Image as ImageIcon, CheckCircle, AlertCircle, RefreshCw, Plus, Gift, Truck, Users, Edit } from 'lucide-react';
-import { collection, doc, getDoc, getDocs, updateDoc, query, where, addDoc, deleteDoc } from 'firebase/firestore';
+import { LogOut, Check, X, ShieldAlert, Award, FileText, Image as ImageIcon, CheckCircle, AlertCircle, RefreshCw, Plus, Gift, Truck, Users, Edit, Megaphone } from 'lucide-react';
+import { collection, doc, getDoc, getDocs, updateDoc, query, where, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export default function AdminDashboard() {
@@ -69,6 +69,17 @@ export default function AdminDashboard() {
   const [expandedContractorId, setExpandedContractorId] = useState(null);
   const [selectedContractorForModal, setSelectedContractorForModal] = useState(null);
   const [zoomedPhoto, setZoomedPhoto] = useState(null);
+
+  // Announcements States
+  const [announcements, setAnnouncements] = useState([]);
+  const [loadingAnnouncements, setLoadingAnnouncements] = useState(true);
+  const [newAnnTitle, setNewAnnTitle] = useState('');
+  const [newAnnDesc, setNewAnnDesc] = useState('');
+  const [annImagePreview, setAnnImagePreview] = useState(null);
+  const [creatingAnn, setCreatingAnn] = useState(false);
+  const [annCreateSuccess, setAnnCreateSuccess] = useState(false);
+  const [annMessage, setAnnMessage] = useState('');
+
 
   const formatDate = (timestamp) => {
     if (!timestamp) return 'N/A';
@@ -150,110 +161,125 @@ export default function AdminDashboard() {
     return [...contractorClaims, ...contractorRedemptions].sort((a, b) => b.timestamp - a.timestamp);
   };
 
-  const loadClaims = async () => {
-    setLoading(true);
-    setError('');
+  const loadClaims = () => {};
+  const loadRedemptions = () => {};
+  const loadGoals = () => {};
+  const loadContractors = () => {};
+
+  const publishNotification = async (contractorId, title, message) => {
+    const newNotif = {
+      id: 'notif-' + Date.now(),
+      contractorId,
+      title,
+      message,
+      timestamp: Date.now()
+    };
 
     if (isMock) {
-      const savedClaims = localStorage.getItem('nilkamal_mock_claims');
-      const mockClaimsList = savedClaims ? JSON.parse(savedClaims) : [];
-      
-      // Calculate Stats
-      const pendingCount = mockClaimsList.filter(c => c.status === 'pending').length;
-      const approvedCount = mockClaimsList.filter(c => c.status === 'approved').length;
-      const rejectedCount = mockClaimsList.filter(c => c.status === 'rejected').length;
-      const totalPoints = mockClaimsList
-        .filter(c => c.status === 'approved')
-        .reduce((sum, c) => sum + c.points, 0);
-
-      setStats({
-        pending: pendingCount,
-        approved: approvedCount,
-        rejected: rejectedCount,
-        totalPointsGiven: totalPoints
-      });
-
-      // Filter and show pending in dashboard queue, or all.
-      // Let's sort pending first, then by timestamp desc.
-      const sorted = [...mockClaimsList].sort((a, b) => {
-        if (a.status === 'pending' && b.status !== 'pending') return -1;
-        if (a.status !== 'pending' && b.status === 'pending') return 1;
-        return b.timestamp - a.timestamp;
-      });
-
-      setClaims(sorted);
-      setLoading(false);
+      const saved = localStorage.getItem('nilkamal_mock_notifications');
+      const allNotifs = saved ? JSON.parse(saved) : [];
+      allNotifs.push(newNotif);
+      localStorage.setItem('nilkamal_mock_notifications', JSON.stringify(allNotifs));
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
       return;
     }
 
     try {
-      const claimsRef = collection(db, 'claims');
-      const querySnapshot = await getDocs(claimsRef);
+      const notifsRef = collection(db, 'notifications');
+      await addDoc(notifsRef, {
+        contractorId,
+        title,
+        message,
+        timestamp: new Date()
+      });
+    } catch (err) {
+      console.error("Error publishing notification:", err);
+    }
+  };
+
+  // Dynamic Stats update
+  useEffect(() => {
+    const pendingCount = claims.filter(c => c.status === 'pending').length;
+    const approvedCount = claims.filter(c => c.status === 'approved').length;
+    const rejectedCount = claims.filter(c => c.status === 'rejected').length;
+    const totalPoints = claims
+      .filter(c => c.status === 'approved')
+      .reduce((sum, c) => sum + (c.points || 0), 0);
+    const pendingRedCount = redemptions.filter(r => r.status === 'requested').length;
+
+    setStats({
+      pending: pendingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+      totalPointsGiven: totalPoints,
+      pendingRedemptions: pendingRedCount
+    });
+  }, [claims, redemptions]);
+
+  // Real-time listener for claims
+  useEffect(() => {
+    if (isMock) {
+      const handleMockClaims = () => {
+        const savedClaims = localStorage.getItem('nilkamal_mock_claims');
+        const mockClaimsList = savedClaims ? JSON.parse(savedClaims) : [];
+        const sorted = [...mockClaimsList].sort((a, b) => {
+          if (a.status === 'pending' && b.status !== 'pending') return -1;
+          if (a.status !== 'pending' && b.status === 'pending') return 1;
+          return b.timestamp - a.timestamp;
+        });
+        setClaims(sorted);
+        setLoading(false);
+      };
+      handleMockClaims();
+      window.addEventListener('nilkamal_mock_db_update', handleMockClaims);
+      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockClaims);
+    }
+
+    setLoading(true);
+    const claimsRef = collection(db, 'claims');
+    const unsubscribe = onSnapshot(claimsRef, (snapshot) => {
       const claimsList = [];
-      
-      querySnapshot.forEach((docSnap) => {
+      snapshot.forEach((docSnap) => {
         claimsList.push({ id: docSnap.id, ...docSnap.data() });
       });
-
-      // Calculate Stats
-      const pendingCount = claimsList.filter(c => c.status === 'pending').length;
-      const approvedCount = claimsList.filter(c => c.status === 'approved').length;
-      const rejectedCount = claimsList.filter(c => c.status === 'rejected').length;
-      const totalPoints = claimsList
-        .filter(c => c.status === 'approved')
-        .reduce((sum, c) => sum + c.points, 0);
-
-      setStats({
-        pending: pendingCount,
-        approved: approvedCount,
-        rejected: rejectedCount,
-        totalPointsGiven: totalPoints
-      });
-
-      // Sort pending first, then desc timestamp
       claimsList.sort((a, b) => {
         if (a.status === 'pending' && b.status !== 'pending') return -1;
         if (a.status !== 'pending' && b.status === 'pending') return 1;
-        
         const t1 = a.timestamp?.seconds || a.timestamp || 0;
         const t2 = b.timestamp?.seconds || b.timestamp || 0;
         return t2 - t1;
       });
-
       setClaims(claimsList);
-    } catch (err) {
-      console.error("Error loading claims in admin view:", err);
-      setError("Failed to fetch claims database. Firestore permissions might need checking.");
-      
-      // Fallback to local
-      const savedClaims = localStorage.getItem('nilkamal_mock_claims');
-      const mockClaimsList = savedClaims ? JSON.parse(savedClaims) : [];
-      setClaims(mockClaimsList);
-    } finally {
       setLoading(false);
-    }
-  };
+    }, (err) => {
+      console.error("Error subscribing to claims in admin view:", err);
+      setError("Failed to subscribe to claims database.");
+      setLoading(false);
+    });
 
-  const loadRedemptions = async () => {
-    setLoadingRedemptions(true);
+    return () => unsubscribe();
+  }, [isMock]);
+
+  // Real-time listener for redemptions
+  useEffect(() => {
     if (isMock) {
-      const saved = localStorage.getItem('nilkamal_mock_redemptions');
-      const mockRedemptions = saved ? JSON.parse(saved) : [];
-      mockRedemptions.sort((a, b) => b.timestamp - a.timestamp);
-      setRedemptions(mockRedemptions);
-      setStats(prev => ({ 
-        ...prev, 
-        pendingRedemptions: mockRedemptions.filter(r => r.status === 'requested').length 
-      }));
-      setLoadingRedemptions(false);
-      return;
+      const handleMockRedemptions = () => {
+        const saved = localStorage.getItem('nilkamal_mock_redemptions');
+        const mockRedemptions = saved ? JSON.parse(saved) : [];
+        mockRedemptions.sort((a, b) => b.timestamp - a.timestamp);
+        setRedemptions(mockRedemptions);
+        setLoadingRedemptions(false);
+      };
+      handleMockRedemptions();
+      window.addEventListener('nilkamal_mock_db_update', handleMockRedemptions);
+      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockRedemptions);
     }
 
-    try {
-      const redemptionsRef = collection(db, 'redemptions');
-      const querySnapshot = await getDocs(redemptionsRef);
+    setLoadingRedemptions(true);
+    const redemptionsRef = collection(db, 'redemptions');
+    const unsubscribe = onSnapshot(redemptionsRef, (snapshot) => {
       const redemptionsList = [];
-      querySnapshot.forEach((doc) => {
+      snapshot.forEach((doc) => {
         redemptionsList.push({ id: doc.id, ...doc.data() });
       });
       redemptionsList.sort((a, b) => {
@@ -262,24 +288,148 @@ export default function AdminDashboard() {
         return t2 - t1;
       });
       setRedemptions(redemptionsList);
-      setStats(prev => ({ 
-        ...prev, 
-        pendingRedemptions: redemptionsList.filter(r => r.status === 'requested').length 
-      }));
-    } catch (err) {
-      console.error("Error loading redemptions:", err);
-      // Fallback
-      const saved = localStorage.getItem('nilkamal_mock_redemptions');
-      const mockRedemptions = saved ? JSON.parse(saved) : [];
-      setRedemptions(mockRedemptions);
-      setStats(prev => ({ 
-        ...prev, 
-        pendingRedemptions: mockRedemptions.filter(r => r.status === 'requested').length 
-      }));
-    } finally {
       setLoadingRedemptions(false);
+    }, (err) => {
+      console.error("Error subscribing to redemptions:", err);
+      setLoadingRedemptions(false);
+    });
+
+    return () => unsubscribe();
+  }, [isMock]);
+
+  // Real-time listener for contractors
+  useEffect(() => {
+    if (isMock) {
+      const handleMockContractors = () => {
+        const saved = localStorage.getItem('nilkamal_mock_contractors_list');
+        let list = saved ? JSON.parse(saved) : [];
+        if (list.length === 0) {
+          list = [
+            {
+              uid: 'mock-contractor-uid',
+              name: 'Ramesh Kumar (Contractor)',
+              role: 'contractor',
+              mobileNumber: '9876543210',
+              photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=60',
+              lastLoginTime: Date.now() - 3600000,
+              lastTransaction: { description: 'Registered account', timestamp: Date.now() - 86400000 },
+              totalPoints: parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10),
+              activeGoal: localStorage.getItem('nilkamal_mock_active_goal') ? JSON.parse(localStorage.getItem('nilkamal_mock_active_goal')) : null
+            }
+          ];
+          localStorage.setItem('nilkamal_mock_contractors_list', JSON.stringify(list));
+        } else {
+          list = list.map(c => {
+            if (c.uid === 'mock-contractor-uid') {
+              return {
+                ...c,
+                mobileNumber: c.mobileNumber || '9876543210',
+                photo: c.photo || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=60',
+                lastLoginTime: c.lastLoginTime || (Date.now() - 3600000),
+                lastTransaction: c.lastTransaction || { description: 'Registered account', timestamp: Date.now() - 86400000 },
+                totalPoints: parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10),
+                activeGoal: localStorage.getItem('nilkamal_mock_active_goal') ? JSON.parse(localStorage.getItem('nilkamal_mock_active_goal')) : null
+              };
+            }
+            return c;
+          });
+          localStorage.setItem('nilkamal_mock_contractors_list', JSON.stringify(list));
+        }
+        setContractors(list);
+        setLoadingContractors(false);
+      };
+      handleMockContractors();
+      window.addEventListener('nilkamal_mock_db_update', handleMockContractors);
+      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockContractors);
     }
-  };
+
+    setLoadingContractors(true);
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('role', '==', 'contractor'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ uid: docSnap.id, ...docSnap.data() });
+      });
+      setContractors(list);
+      setLoadingContractors(false);
+    }, (err) => {
+      console.error("Error subscribing to contractors:", err);
+      setLoadingContractors(false);
+    });
+
+    return () => unsubscribe();
+  }, [isMock]);
+
+  // Real-time listener for goals
+  useEffect(() => {
+    if (isMock) {
+      const handleMockGoals = () => {
+        const saved = localStorage.getItem('nilkamal_mock_goals');
+        const parsed = saved ? JSON.parse(saved) : [];
+        parsed.sort((a, b) => a.pointsRequired - b.pointsRequired);
+        setGoals(parsed);
+        setLoadingGoals(false);
+      };
+      handleMockGoals();
+      window.addEventListener('nilkamal_mock_db_update', handleMockGoals);
+      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockGoals);
+    }
+
+    setLoadingGoals(true);
+    const goalsRef = collection(db, 'goals');
+    const unsubscribe = onSnapshot(goalsRef, (snapshot) => {
+      const goalsList = [];
+      snapshot.forEach((doc) => {
+        goalsList.push({ id: doc.id, ...doc.data() });
+      });
+      goalsList.sort((a, b) => a.pointsRequired - b.pointsRequired);
+      setGoals(goalsList);
+      setLoadingGoals(false);
+    }, (err) => {
+      console.error("Error subscribing to goals:", err);
+      setLoadingGoals(false);
+    });
+
+    return () => unsubscribe();
+  }, [isMock]);
+
+  // Real-time listener for announcements
+  useEffect(() => {
+    if (isMock) {
+      const handleMockAnnouncements = () => {
+        const saved = localStorage.getItem('nilkamal_mock_announcements');
+        const mockAnnList = saved ? JSON.parse(saved) : [];
+        mockAnnList.sort((a, b) => b.timestamp - a.timestamp);
+        setAnnouncements(mockAnnList);
+        setLoadingAnnouncements(false);
+      };
+      handleMockAnnouncements();
+      window.addEventListener('nilkamal_mock_db_update', handleMockAnnouncements);
+      return () => window.removeEventListener('nilkamal_mock_db_update', handleMockAnnouncements);
+    }
+
+    setLoadingAnnouncements(true);
+    const announcementsRef = collection(db, 'announcements');
+    const unsubscribe = onSnapshot(announcementsRef, (snapshot) => {
+      const annList = [];
+      snapshot.forEach((doc) => {
+        annList.push({ id: doc.id, ...doc.data() });
+      });
+      annList.sort((a, b) => {
+        const t1 = a.timestamp?.seconds || a.timestamp || 0;
+        const t2 = b.timestamp?.seconds || b.timestamp || 0;
+        return t2 - t1;
+      });
+      setAnnouncements(annList);
+      setLoadingAnnouncements(false);
+    }, (err) => {
+      console.error("Error subscribing to announcements:", err);
+      setLoadingAnnouncements(false);
+    });
+
+    return () => unsubscribe();
+  }, [isMock]);
 
   const handleMarkDelivered = (redemption) => {
     setDeliveringRedemption(redemption);
@@ -326,11 +476,16 @@ export default function AdminDashboard() {
         // Update contractor transaction
         await updateContractorTransaction(deliveringRedemption.contractorId, `Delivered reward: ${deliveringRedemption.goalName}`);
 
+        // Publish notification
+        await publishNotification(
+          deliveringRedemption.contractorId, 
+          "Reward Delivered!", 
+          `Your requested reward "${deliveringRedemption.goalName}" has been delivered successfully.`
+        );
+
         setSubmittingDelivery(false);
         setDeliveringRedemption(null);
         setDeliveryImagePreview(null);
-        loadRedemptions();
-        loadContractors();
       }, 800);
       return;
     }
@@ -345,11 +500,16 @@ export default function AdminDashboard() {
       // Update contractor transaction
       await updateContractorTransaction(deliveringRedemption.contractorId, `Delivered reward: ${deliveringRedemption.goalName}`);
 
+      // Publish notification
+      await publishNotification(
+        deliveringRedemption.contractorId, 
+        "Reward Delivered!", 
+        `Your requested reward "${deliveringRedemption.goalName}" has been delivered successfully.`
+      );
+
       setSubmittingDelivery(false);
       setDeliveringRedemption(null);
       setDeliveryImagePreview(null);
-      loadRedemptions();
-      loadContractors();
     } catch (err) {
       console.error("Error marking redemption as delivered:", err);
       alert("Error updating redemption status.");
@@ -365,97 +525,6 @@ export default function AdminDashboard() {
         setGoalImagePreview(reader.result);
       };
       reader.readAsDataURL(file);
-    }
-  };
-
-  const loadGoals = async () => {
-    setLoadingGoals(true);
-    if (isMock) {
-      const saved = localStorage.getItem('nilkamal_mock_goals');
-      const parsed = saved ? JSON.parse(saved) : [];
-      parsed.sort((a, b) => a.pointsRequired - b.pointsRequired);
-      setGoals(parsed);
-      setLoadingGoals(false);
-      return;
-    }
-
-    try {
-      const goalsRef = collection(db, 'goals');
-      const querySnapshot = await getDocs(goalsRef);
-      const goalsList = [];
-      querySnapshot.forEach((doc) => {
-        goalsList.push({ id: doc.id, ...doc.data() });
-      });
-      goalsList.sort((a, b) => a.pointsRequired - b.pointsRequired);
-      setGoals(goalsList);
-    } catch (err) {
-      console.error("Error loading goals:", err);
-      const saved = localStorage.getItem('nilkamal_mock_goals');
-      const parsed = saved ? JSON.parse(saved) : [];
-      parsed.sort((a, b) => a.pointsRequired - b.pointsRequired);
-      setGoals(parsed);
-    } finally {
-      setLoadingGoals(false);
-    }
-  };
-
-  const loadContractors = async () => {
-    setLoadingContractors(true);
-    if (isMock) {
-      const saved = localStorage.getItem('nilkamal_mock_contractors_list');
-      let list = saved ? JSON.parse(saved) : [];
-      if (list.length === 0) {
-        list = [
-          {
-            uid: 'mock-contractor-uid',
-            name: 'Ramesh Kumar (Contractor)',
-            role: 'contractor',
-            mobileNumber: '9876543210',
-            photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=60',
-            lastLoginTime: Date.now() - 3600000,
-            lastTransaction: { description: 'Registered account', timestamp: Date.now() - 86400000 },
-            totalPoints: parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10),
-            activeGoal: localStorage.getItem('nilkamal_mock_active_goal') ? JSON.parse(localStorage.getItem('nilkamal_mock_active_goal')) : null
-          }
-        ];
-        localStorage.setItem('nilkamal_mock_contractors_list', JSON.stringify(list));
-      } else {
-        list = list.map(c => {
-          if (c.uid === 'mock-contractor-uid') {
-            return {
-              ...c,
-              mobileNumber: c.mobileNumber || '9876543210',
-              photo: c.photo || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=60',
-              lastLoginTime: c.lastLoginTime || (Date.now() - 3600000),
-              lastTransaction: c.lastTransaction || { description: 'Registered account', timestamp: Date.now() - 86400000 },
-              totalPoints: parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10),
-              activeGoal: localStorage.getItem('nilkamal_mock_active_goal') ? JSON.parse(localStorage.getItem('nilkamal_mock_active_goal')) : null
-            };
-          }
-          return c;
-        });
-        localStorage.setItem('nilkamal_mock_contractors_list', JSON.stringify(list));
-      }
-      setContractors(list);
-      setLoadingContractors(false);
-      return;
-    }
-
-    try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('role', '==', 'contractor'));
-      const querySnapshot = await getDocs(q);
-      const list = [];
-      querySnapshot.forEach((docSnap) => {
-        list.push({ uid: docSnap.id, ...docSnap.data() });
-      });
-      setContractors(list);
-    } catch (err) {
-      console.error("Error loading contractors:", err);
-      const saved = localStorage.getItem('nilkamal_mock_contractors_list');
-      setContractors(saved ? JSON.parse(saved) : []);
-    } finally {
-      setLoadingContractors(false);
     }
   };
 
@@ -698,6 +767,100 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleAnnImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAnnImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCreateAnnouncement = async (e) => {
+    e.preventDefault();
+    if (!newAnnTitle || !newAnnDesc) return;
+
+    setCreatingAnn(true);
+    const imageVal = annImagePreview || '';
+
+    if (isMock) {
+      const annData = {
+        id: 'mock-ann-' + Date.now(),
+        title: newAnnTitle,
+        description: newAnnDesc,
+        imageUrl: imageVal,
+        timestamp: Date.now()
+      };
+
+      const saved = localStorage.getItem('nilkamal_mock_announcements');
+      const allAnn = saved ? JSON.parse(saved) : [];
+      allAnn.push(annData);
+      localStorage.setItem('nilkamal_mock_announcements', JSON.stringify(allAnn));
+
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
+
+      setTimeout(() => {
+        setCreatingAnn(false);
+        setNewAnnTitle('');
+        setNewAnnDesc('');
+        setAnnImagePreview(null);
+        setAnnCreateSuccess(true);
+        setAnnMessage('Announcement published successfully!');
+        setTimeout(() => {
+          setAnnCreateSuccess(false);
+          setAnnMessage('');
+        }, 3000);
+      }, 500);
+      return;
+    }
+
+    try {
+      const announcementsRef = collection(db, 'announcements');
+      await addDoc(announcementsRef, {
+        title: newAnnTitle,
+        description: newAnnDesc,
+        imageUrl: imageVal,
+        timestamp: new Date()
+      });
+      setCreatingAnn(false);
+      setNewAnnTitle('');
+      setNewAnnDesc('');
+      setAnnImagePreview(null);
+      setAnnCreateSuccess(true);
+      setAnnMessage('Announcement published successfully!');
+      setTimeout(() => {
+        setAnnCreateSuccess(false);
+        setAnnMessage('');
+      }, 3000);
+    } catch (err) {
+      console.error("Error creating announcement in Firestore:", err);
+      alert("Error publishing announcement to database.");
+      setCreatingAnn(false);
+    }
+  };
+
+  const handleDeleteAnnouncement = async (annId) => {
+    if (!confirm("Are you sure you want to delete this announcement?")) return;
+
+    if (isMock) {
+      const saved = localStorage.getItem('nilkamal_mock_announcements');
+      const allAnn = saved ? JSON.parse(saved) : [];
+      const updated = allAnn.filter(a => a.id !== annId);
+      localStorage.setItem('nilkamal_mock_announcements', JSON.stringify(updated));
+      window.dispatchEvent(new Event('nilkamal_mock_db_update'));
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'announcements', annId));
+    } catch (err) {
+      console.error("Error deleting announcement:", err);
+      alert("Failed to delete announcement.");
+    }
+  };
+
   useEffect(() => {
     loadClaims();
     loadRedemptions();
@@ -735,14 +898,19 @@ export default function AdminDashboard() {
       await updateContractorPoints(claim.contractorId, finalPoints);
 
       // Update contractor transaction
-      await updateContractorTransaction(claim.contractorId, `Approved Bill ${claim.billNumber} (+${finalPoints} Pts)`);
+      await updateContractorTransaction(claim.contractorId, `Approved Bill ${claim.billNumber || ''} (+${finalPoints} Pts)`);
+
+      // Publish notification
+      await publishNotification(
+        claim.contractorId,
+        "Bill Approved!",
+        `Your bill ${claim.billNumber || ''} has been approved. +${finalPoints} points added.`
+      );
 
       // Simulate network delay
       setTimeout(() => {
         setActioningClaimId(null);
         setSelectedClaim(null);
-        loadClaims();
-        loadContractors();
       }, 500);
       return;
     }
@@ -760,12 +928,17 @@ export default function AdminDashboard() {
       await updateContractorPoints(claim.contractorId, finalPoints);
 
       // Update contractor transaction
-      await updateContractorTransaction(claim.contractorId, `Approved Bill ${claim.billNumber} (+${finalPoints} Pts)`);
+      await updateContractorTransaction(claim.contractorId, `Approved Bill ${claim.billNumber || ''} (+${finalPoints} Pts)`);
+
+      // Publish notification
+      await publishNotification(
+        claim.contractorId,
+        "Bill Approved!",
+        `Your bill ${claim.billNumber || ''} has been approved. +${finalPoints} points added.`
+      );
 
       setActioningClaimId(null);
       setSelectedClaim(null);
-      loadClaims();
-      loadContractors();
     } catch (err) {
       console.error("Error approving claim:", err);
       alert("Error updating database. Operation failed.");
@@ -789,12 +962,18 @@ export default function AdminDashboard() {
       localStorage.setItem('nilkamal_mock_claims', JSON.stringify(updatedClaims));
 
       // Update contractor transaction
-      await updateContractorTransaction(claim.contractorId, `Rejected Bill ${claim.billNumber}`);
+      await updateContractorTransaction(claim.contractorId, `Rejected Bill ${claim.billNumber || ''}`);
+
+      // Publish notification
+      await publishNotification(
+        claim.contractorId,
+        "Bill Rejected",
+        `Your bill ${claim.billNumber || ''} has been rejected.`
+      );
 
       setTimeout(() => {
         setActioningClaimId(null);
         setSelectedClaim(null);
-        loadClaims();
       }, 500);
       return;
     }
@@ -804,11 +983,17 @@ export default function AdminDashboard() {
       await updateDoc(claimRef, { status: 'rejected' });
       
       // Update contractor transaction
-      await updateContractorTransaction(claim.contractorId, `Rejected Bill ${claim.billNumber}`);
+      await updateContractorTransaction(claim.contractorId, `Rejected Bill ${claim.billNumber || ''}`);
+
+      // Publish notification
+      await publishNotification(
+        claim.contractorId,
+        "Bill Rejected",
+        `Your bill ${claim.billNumber || ''} has been rejected.`
+      );
 
       setActioningClaimId(null);
       setSelectedClaim(null);
-      loadClaims();
     } catch (err) {
       console.error("Error rejecting claim:", err);
       alert("Error updating database. Operation failed.");
@@ -882,54 +1067,66 @@ export default function AdminDashboard() {
         )}
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-slate-200 overflow-x-auto no-scrollbar gap-2 pb-px bg-white p-2 rounded-2xl shadow-sm mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           <button
             type="button"
             onClick={() => setActiveTab('approvals')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'approvals'
-                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10 font-bold'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
+                : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
             }`}
           >
-            <FileText className="w-4 h-4" />
-            <span>Bill Approvals ({stats.pending})</span>
+            <FileText className="w-4.5 h-4.5 shrink-0" />
+            <span>Approvals ({stats.pending})</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('redemptions')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'redemptions'
-                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10 font-bold'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
+                : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
             }`}
           >
-            <Truck className="w-4 h-4" />
-            <span>Reward Delivery ({stats.pendingRedemptions || 0})</span>
+            <Truck className="w-4.5 h-4.5 shrink-0" />
+            <span>Delivery ({stats.pendingRedemptions || 0})</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('contractors')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'contractors'
-                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10 font-bold'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
+                : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
             }`}
           >
-            <Users className="w-4 h-4" />
+            <Users className="w-4.5 h-4.5 shrink-0" />
             <span>Contractors</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('catalog')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'catalog'
-                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10 font-bold'
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
+                : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
             }`}
           >
-            <Gift className="w-4 h-4" />
-            <span>Manage Catalog</span>
+            <Gift className="w-4.5 h-4.5 shrink-0" />
+            <span>Catalog</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('announcements')}
+            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+              activeTab === 'announcements'
+                ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
+                : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
+            }`}
+          >
+            <Megaphone className="w-4.5 h-4.5 shrink-0" />
+            <span>Updates</span>
           </button>
         </div>
 
@@ -1024,6 +1221,9 @@ export default function AdminDashboard() {
                             </b>
                           </span>
                           <span>Bill Date: <b className="text-slate-800">{claim.billDate ? formatDate(claim.billDate) : 'N/A'}</b></span>
+                          {claim.place && (
+                            <span>Place: <b className="text-slate-850 font-bold">📍 {claim.place}</b></span>
+                          )}
                         </div>
                         <p className="text-[10px] text-slate-400">
                           Submitted: {formatDateTime(claim.timestamp)}
@@ -1533,6 +1733,169 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {activeTab === 'announcements' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Create Announcement Form (Left Panel) */}
+          <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="bg-slate-100 p-4 border-b border-slate-200">
+              <h3 className="font-extrabold text-slate-800 uppercase tracking-wider text-sm flex items-center gap-2">
+                <Plus className="w-5 h-5 text-brand-blue" />
+                <span>Publish New Update</span>
+              </h3>
+            </div>
+
+            <form onSubmit={handleCreateAnnouncement} className="p-5 md:p-6 space-y-4 flex-1 flex flex-col justify-between">
+              <div className="space-y-4">
+                {annMessage && (
+                  <div className="p-4 bg-green-50 border-l-4 border-green-500 rounded-r-lg text-green-700 text-sm flex items-start gap-2.5">
+                    <CheckCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                    <span>{annMessage}</span>
+                  </div>
+                )}
+
+                {/* Announcement Title */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-600 uppercase mb-1.5 pl-0.5">
+                    Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={newAnnTitle}
+                    onChange={(e) => setNewAnnTitle(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 font-semibold focus:outline-none transition-all"
+                    placeholder="e.g. New Product Launch!"
+                    required
+                  />
+                </div>
+
+                {/* Announcement Description */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-600 uppercase mb-1.5 pl-0.5">
+                    Description / Content *
+                  </label>
+                  <textarea
+                    value={newAnnDesc}
+                    onChange={(e) => setNewAnnDesc(e.target.value)}
+                    rows={4}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 font-semibold focus:outline-none transition-all resize-none"
+                    placeholder="Describe the update or announcement details here..."
+                    required
+                  />
+                </div>
+
+                {/* Image Upload Input */}
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-600 uppercase mb-1.5 pl-0.5">
+                    Image (Optional)
+                  </label>
+                  <div className="relative">
+                    {annImagePreview ? (
+                      <div className="relative rounded-2xl overflow-hidden border border-slate-200 h-28 flex justify-center bg-slate-900">
+                        <img src={annImagePreview} alt="Announcement Preview" className="h-full object-contain" />
+                        <button
+                          type="button"
+                          onClick={() => setAnnImagePreview(null)}
+                          className="absolute top-1.5 right-1.5 bg-red-600 text-white p-1 rounded-full shadow-md cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="w-full h-28 border-2 border-dashed border-slate-300 hover:border-brand-blue rounded-xl flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all bg-slate-50 hover:bg-brand-blue/5 text-center px-4">
+                        <ImageIcon className="w-6 h-6 text-slate-400" />
+                        <span className="text-xs font-black text-slate-500 uppercase tracking-wide">
+                          Upload Image
+                        </span>
+                        <span className="text-[9px] text-slate-400">JPEG, PNG file</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAnnImageChange}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 w-full">
+                <button
+                  type="submit"
+                  disabled={creatingAnn}
+                  className="w-full py-3 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md border-2 border-white disabled:opacity-75 bg-brand-blue hover:bg-brand-blue/95 shadow-brand-blue/10 hover:shadow-brand-blue/20"
+                >
+                  {creatingAnn ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <>
+                      <Megaphone className="w-4 h-4" />
+                      <span>Publish Announcement</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Active Announcements List (Right Panel) */}
+          <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+            <div className="bg-slate-100 p-4 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-extrabold text-slate-800 uppercase tracking-wider text-sm flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-brand-blue" />
+                <span>Published Announcements</span>
+              </h3>
+              <span className="bg-brand-blue/10 text-brand-blue text-xs font-bold px-2 py-0.5 rounded-full border border-brand-blue/20">
+                {announcements.length} updates
+              </span>
+            </div>
+
+            <div className="p-4 overflow-y-auto max-h-[460px] flex-1">
+              {loadingAnnouncements ? (
+                <div className="py-12 text-center text-slate-400 text-sm font-semibold">
+                  Loading updates...
+                </div>
+              ) : announcements.length === 0 ? (
+                <div className="py-12 text-center text-slate-500">
+                  <Megaphone className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="font-bold text-sm">No announcements published</p>
+                  <p className="text-xs text-slate-400">Use the form to publish the first update.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {announcements.map((ann) => (
+                    <div key={ann.id} className="p-4 border border-slate-150 rounded-xl bg-slate-50 flex gap-4 items-start justify-between">
+                      <div className="flex gap-3 items-start flex-1 min-w-0">
+                        {ann.imageUrl && (
+                          <div className="w-16 h-16 rounded-lg border border-slate-200 overflow-hidden shrink-0">
+                            <img src={ann.imageUrl} alt={ann.title} className="w-full h-full object-cover" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-extrabold text-slate-800 text-sm truncate">{ann.title}</h4>
+                          <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap break-words">{ann.description}</p>
+                          <span className="text-[9px] text-slate-400 font-bold block mt-2">
+                            {formatDateTime(ann.timestamp)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAnnouncement(ann.id)}
+                        className="p-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-lg active:scale-95 transition-all cursor-pointer shrink-0"
+                        title="Delete Update"
+                      >
+                        <X className="w-4 h-4 stroke-[2.5]" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       </main>
 
       {/* Bill Inspector Modal */}
@@ -1582,6 +1945,11 @@ export default function AdminDashboard() {
                     <span className="text-xs font-semibold text-slate-700 block">
                       Bill Date: <b className="text-slate-900">{selectedClaim.billDate ? formatDate(selectedClaim.billDate) : 'N/A'}</b>
                     </span>
+                    {selectedClaim.place && (
+                      <span className="text-xs font-semibold text-slate-700 block">
+                        Place: <b className="text-slate-900">📍 {selectedClaim.place}</b>
+                      </span>
+                    )}
                     <span className="text-[10px] text-slate-400 font-semibold block uppercase">
                       Uploaded: {formatDateTime(selectedClaim.timestamp)}
                     </span>
