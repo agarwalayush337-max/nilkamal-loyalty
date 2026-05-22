@@ -1,24 +1,22 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, Key, Mail, ShieldAlert, Phone, User, Camera, ArrowLeft, Send, CheckCircle } from 'lucide-react';
+import { LogIn, Key, ShieldAlert, Phone, User, Camera, ArrowLeft, Send, CheckCircle } from 'lucide-react';
+import { signInWithPhoneNumber, RecaptchaVerifier } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function Login() {
-  const [loginMode, setLoginMode] = useState('otp'); // 'otp' or 'password'
   const [isRegistering, setIsRegistering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState('');
   const [notification, setNotification] = useState('');
-
-  // Email login states
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
 
   // OTP login states
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [sentOtpCode, setSentOtpCode] = useState('');
+  const [confirmationResult, setConfirmationResult] = useState(null);
 
   // Contractor registration states
   const [registerName, setRegisterName] = useState('');
@@ -26,95 +24,142 @@ export default function Login() {
   const [registerPhoto, setRegisterPhoto] = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);
 
-  const { login, loginWithOtp, registerContractor, error: authError } = useAuth();
+  const { loginWithOtp, registerContractor, error: authError } = useAuth();
   const navigate = useNavigate();
 
   const handlePhotoChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setRegisterPhoto(reader.result);
-        setPhotoPreview(reader.result);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          // Resize to max 400px width/height while maintaining ratio
+          const maxDim = 400;
+          if (width > height) {
+            if (width > maxDim) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            }
+          } else {
+            if (height > maxDim) {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to compressed jpeg base64 (quality 0.7)
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          setRegisterPhoto(compressedBase64);
+          setPhotoPreview(compressedBase64);
+        };
+        img.src = event.target.result;
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleEmailSubmit = async (e) => {
-    e.preventDefault();
-    if (!email || !password) {
-      setLocalError('Please fill in all fields.');
-      return;
-    }
-    setLocalError('');
-    setLoading(true);
 
-    try {
-      const res = await login(email, password);
-      if (res.success) {
-        if (res.role === 'admin') {
-          navigate('/master-dashboard');
-        } else {
-          navigate('/contractor-dashboard');
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+  const formatPhoneNumber = (phone) => {
+    let cleaned = phone.replace(/\s+/g, '');
+    if (cleaned.startsWith('+')) {
+      return cleaned;
     }
+    if (cleaned.length === 10) {
+      return '+91' + cleaned;
+    }
+    if (cleaned.length === 12 && cleaned.startsWith('91')) {
+      return '+' + cleaned;
+    }
+    return cleaned;
   };
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
-    if (!mobileNumber) {
+    const phoneToVerify = isRegistering ? registerMobile : mobileNumber;
+    if (!phoneToVerify) {
       setLocalError('Please enter your mobile number.');
       return;
     }
-    if (mobileNumber.length < 10) {
+
+    const formattedPhone = formatPhoneNumber(phoneToVerify);
+    const normalizedMobile = formattedPhone.replace(/\D/g, '').slice(-10);
+
+    if (normalizedMobile.length < 10) {
       setLocalError('Please enter a valid 10-digit mobile number.');
       return;
     }
+
     setLocalError('');
     setLoading(true);
 
-    const normalizedMobile = mobileNumber.trim();
-
     try {
-      // Determine if we're in mock mode
       const isMockMode = !import.meta.env.VITE_FIREBASE_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY.includes('PLACEHOLDER');
       
       let exists = false;
       if (isMockMode) {
         const savedContractors = localStorage.getItem('nilkamal_mock_contractors_list');
         const list = savedContractors ? JSON.parse(savedContractors) : [];
-        exists = list.some(c => c.mobileNumber === normalizedMobile) || normalizedMobile === '9876543210';
+        exists = list.some(c => c.mobileNumber === normalizedMobile) || normalizedMobile === '9876543210' || normalizedMobile === '9876543211';
       } else {
         const { collection, query, where, getDocs } = await import('firebase/firestore');
         const { db } = await import('../firebase');
-        const q = query(collection(db, 'users'), where('mobileNumber', '==', normalizedMobile), where('role', '==', 'contractor'));
+        const q = query(collection(db, 'users'), where('mobileNumber', '==', normalizedMobile));
         const querySnapshot = await getDocs(q);
         exists = !querySnapshot.empty;
       }
 
-      if (!exists) {
-        setLocalError('Mobile number is not registered. Please register as a new contractor first.');
+      if (!isRegistering && !exists) {
+        setLocalError('Mobile number is not registered. Please register first.');
         setLoading(false);
         return;
       }
 
-      // Generate verification code
-      const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
-      setSentOtpCode(generatedCode);
-      setOtpSent(true);
-      setNotification(`Verification Code sent to ${mobileNumber}: ${generatedCode}`);
-      
-      // Auto clear notification after 15s
-      setTimeout(() => setNotification(''), 15000);
+      if (isRegistering && exists) {
+        setLocalError('This mobile number is already registered. Please login.');
+        setLoading(false);
+        return;
+      }
+
+      if (isMockMode) {
+        const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+        setSentOtpCode(generatedCode);
+        setOtpSent(true);
+        setNotification(`Verification Code sent to ${formattedPhone}: ${generatedCode}`);
+        setTimeout(() => setNotification(''), 15000);
+      } else {
+        if (!window.recaptchaVerifier) {
+          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+            size: 'invisible'
+          });
+        }
+        const appVerifier = window.recaptchaVerifier;
+        const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+        setConfirmationResult(confirmation);
+        setOtpSent(true);
+        setNotification(`OTP verification code sent to ${formattedPhone}.`);
+        setTimeout(() => setNotification(''), 15000);
+      }
     } catch (err) {
       console.error("OTP send error:", err);
-      setLocalError('Failed to verify mobile number. Check connection.');
+      setLocalError(err.message || 'Failed to send verification code. Check connection.');
+      if (window.recaptchaVerifier) {
+        try {
+          window.recaptchaVerifier.clear();
+          window.recaptchaVerifier = null;
+        } catch (e) {
+          console.error("Error clearing recaptcha:", e);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -126,22 +171,140 @@ export default function Login() {
       setLocalError('Please enter the OTP verification code.');
       return;
     }
-    if (otp !== sentOtpCode) {
-      setLocalError('Incorrect verification code. Please check the code and try again.');
-      return;
-    }
     
     setLocalError('');
     setLoading(true);
 
+    const isMockMode = !import.meta.env.VITE_FIREBASE_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY.includes('PLACEHOLDER');
+
     try {
-      const res = await loginWithOtp(mobileNumber);
-      if (res.success) {
+      const phoneToVerify = isRegistering ? registerMobile : mobileNumber;
+      const formattedPhone = formatPhoneNumber(phoneToVerify);
+      const normalizedMobile = formattedPhone.replace(/\D/g, '').slice(-10);
+
+      if (isMockMode) {
+        if (otp !== sentOtpCode) {
+          setLocalError('Incorrect verification code. Please check the code and try again.');
+          setLoading(false);
+          return;
+        }
+
+        if (isRegistering) {
+          const res = await registerContractor(registerName, normalizedMobile, registerPhoto);
+          if (res.success) {
+            setNotification('');
+            navigate('/contractor-dashboard');
+          }
+        } else {
+          const res = await loginWithOtp(normalizedMobile);
+          if (res.success) {
+            setNotification('');
+            if (res.role === 'admin') {
+              navigate('/master-dashboard');
+            } else {
+              navigate('/contractor-dashboard');
+            }
+          }
+        }
+      } else {
+        if (!confirmationResult) {
+          setLocalError('No active verification session. Please resend the code.');
+          setLoading(false);
+          return;
+        }
+
+        const userCredential = await confirmationResult.confirm(otp);
+        const firebaseUser = userCredential.user;
+
+        const { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+
+        let finalRole = 'contractor';
+        let foundData = null;
+
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+
+        if (userDocSnap.exists()) {
+          foundData = userDocSnap.data();
+          finalRole = foundData.role || 'contractor';
+        } else {
+          const q = query(collection(db, 'users'), where('mobileNumber', '==', normalizedMobile));
+          const querySnapshot = await getDocs(q);
+
+          if (!querySnapshot.empty) {
+            const matchedDoc = querySnapshot.docs[0];
+            const matchedData = matchedDoc.data();
+            finalRole = matchedData.role || 'contractor';
+
+            await setDoc(userDocRef, { ...matchedData, uid: firebaseUser.uid });
+
+            if (matchedDoc.id !== firebaseUser.uid) {
+              const { deleteDoc } = await import('firebase/firestore');
+              await deleteDoc(doc(db, 'users', matchedDoc.id));
+
+              const claimsRef = collection(db, 'claims');
+              const claimsQ = query(claimsRef, where('contractorId', '==', matchedDoc.id));
+              const claimsSnap = await getDocs(claimsQ);
+              for (const claimD of claimsSnap.docs) {
+                await updateDoc(doc(db, 'claims', claimD.id), { contractorId: firebaseUser.uid });
+              }
+
+              const redemptionsRef = collection(db, 'redemptions');
+              const redemptionsQ = query(redemptionsRef, where('contractorId', '==', matchedDoc.id));
+              const redemptionsSnap = await getDocs(redemptionsQ);
+              for (const redD of redemptionsSnap.docs) {
+                await updateDoc(doc(db, 'redemptions', redD.id), { contractorId: firebaseUser.uid });
+              }
+              console.log(`Successfully migrated user ${matchedDoc.id} data to Firebase UID ${firebaseUser.uid}`);
+            }
+            foundData = { ...matchedData, uid: firebaseUser.uid };
+          } else {
+            if (isRegistering) {
+              const newContractor = {
+                uid: firebaseUser.uid,
+                name: registerName,
+                mobileNumber: normalizedMobile,
+                photo: registerPhoto,
+                role: 'contractor',
+                totalPoints: 0,
+                activeGoal: null,
+                lastLoginTime: Date.now(),
+                lastTransaction: { description: 'Registered account', timestamp: Date.now() }
+              };
+              await setDoc(userDocRef, newContractor);
+              foundData = newContractor;
+              finalRole = 'contractor';
+            } else {
+              const defaultData = {
+                uid: firebaseUser.uid,
+                name: firebaseUser.displayName || 'Contractor',
+                mobileNumber: normalizedMobile,
+                role: 'contractor',
+                totalPoints: 0,
+                activeGoal: null,
+                lastLoginTime: Date.now()
+              };
+              await setDoc(userDocRef, defaultData);
+              foundData = defaultData;
+              finalRole = 'contractor';
+            }
+          }
+        }
+
+        localStorage.setItem('nilkamal_logged_in_mobile_uid', firebaseUser.uid);
+        localStorage.removeItem('nilkamal_mock_user');
+        
         setNotification('');
-        navigate('/contractor-dashboard');
+        if (finalRole === 'admin') {
+          navigate('/master-dashboard');
+        } else {
+          navigate('/contractor-dashboard');
+        }
       }
     } catch (err) {
-      setLocalError(err.message || 'OTP login failed.');
+      console.error("OTP verification error:", err);
+      setLocalError(err.message || 'OTP verification failed.');
     } finally {
       setLoading(false);
     }
@@ -157,37 +320,10 @@ export default function Login() {
       setLocalError('Please enter a valid 10-digit mobile number.');
       return;
     }
-    setLocalError('');
-    setLoading(true);
-
-    try {
-      const res = await registerContractor(registerName, registerMobile, registerPhoto);
-      if (res.success) {
-        setNotification('');
-        navigate('/contractor-dashboard');
-      }
-    } catch (err) {
-      setLocalError(err.message || 'Registration failed.');
-    } finally {
-      setLoading(false);
-    }
+    await handleSendOtp(e);
   };
 
-  const setTestCredentials = (role) => {
-    setLocalError('');
-    setNotification('');
-    setIsRegistering(false);
-    
-    if (role === 'contractor') {
-      setLoginMode('otp');
-      setMobileNumber('9876543210');
-      setOtpSent(false);
-    } else {
-      setLoginMode('password');
-      setEmail('admin@test.com');
-      setPassword('password123');
-    }
-  };
+
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center p-4 relative">
@@ -220,28 +356,6 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Tab Headers (Only when not registering) */}
-        {!isRegistering && (
-          <div className="flex border-b border-slate-100 bg-slate-50/50 p-1.5 m-4 rounded-2xl">
-            <button
-              onClick={() => { setLoginMode('otp'); setLocalError(''); }}
-              className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                loginMode === 'otp' ? 'bg-brand-blue text-white shadow' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Mobile OTP
-            </button>
-            <button
-              onClick={() => { setLoginMode('password'); setLocalError(''); }}
-              className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                loginMode === 'password' ? 'bg-brand-blue text-white shadow' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Email Login
-            </button>
-          </div>
-        )}
-
         {/* Form Body */}
         <div className="px-8 pb-8 pt-4">
           {(localError || authError) && (
@@ -251,8 +365,61 @@ export default function Login() {
             </div>
           )}
 
-          {isRegistering ? (
-            /* Registration Form */
+          {otpSent ? (
+            /* Stage 2: Verify OTP */
+            <form onSubmit={handleVerifyOtp} className="space-y-6">
+              <div className="bg-blue-50/50 p-4 border border-blue-100 rounded-2xl flex justify-between items-center text-xs">
+                <div>
+                  <span className="text-slate-400 font-bold block uppercase tracking-wider">Mobile Number</span>
+                  <span className="text-slate-800 font-extrabold text-sm">{isRegistering ? registerMobile : mobileNumber}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setOtpSent(false); setOtp(''); setLocalError(''); }}
+                  className="text-brand-blue font-extrabold hover:underline uppercase tracking-wider text-[10px]"
+                >
+                  Change Number
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 text-center">
+                  Enter 6-Digit OTP Code
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                    <Key className="w-5 h-5" />
+                  </span>
+                  <input
+                    type="text"
+                    maxLength="6"
+                    pattern="[0-9]{6}"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                    className="w-full pl-11 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 tracking-[0.3em] text-center font-black text-2xl focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
+                    placeholder="••••••"
+                    required
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-[#0093DD] hover:bg-[#007cbd] active:scale-[0.99] text-white font-black py-4.5 px-4 rounded-2xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer text-lg disabled:opacity-75 uppercase tracking-wider"
+              >
+                {loading ? (
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <>
+                    <LogIn className="w-6 h-6" />
+                    <span>Verify & Login</span>
+                  </>
+                )}
+              </button>
+            </form>
+          ) : isRegistering ? (
+            /* Stage 1 (Registration): Form Inputs */
             <form onSubmit={handleRegisterSubmit} className="space-y-5">
               <div className="flex items-center gap-2 mb-2">
                 <button
@@ -280,7 +447,7 @@ export default function Login() {
                       <Camera className="w-8 h-8 stroke-[1.5]" />
                     </div>
                   )}
-                  <label className="absolute bottom-0 right-0 bg-brand-blue hover:bg-brand-blue/95 text-white p-2 rounded-full cursor-pointer shadow-md transition-all active:scale-90">
+                  <label className="absolute bottom-0 right-0 bg-[#0093DD] hover:bg-[#007cbd] text-white p-2 rounded-full cursor-pointer shadow-md transition-all active:scale-90">
                     <Camera className="w-4 h-4" />
                     <input
                       type="file"
@@ -319,140 +486,80 @@ export default function Login() {
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                   Mobile Number *
                 </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                    <Phone className="w-5 h-5" />
+                <div className="relative flex items-center">
+                  <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-500 font-extrabold text-sm border-r border-slate-200 pr-3 h-full">
+                    +91
                   </span>
                   <input
                     type="tel"
-                    pattern="[0-9]{10}"
                     maxLength="10"
                     value={registerMobile}
                     onChange={(e) => setRegisterMobile(e.target.value.replace(/\D/g, ''))}
-                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
-                    placeholder="10-digit number"
+                    className="w-full pl-16 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
+                    placeholder="9876543210"
                     required
                   />
                 </div>
               </div>
 
-              {/* Register Button */}
+              {/* Register & Send OTP Button */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-green-600 hover:bg-green-500 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-green-600/10 hover:shadow-green-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer text-base disabled:opacity-75"
+                className="w-full bg-[#0093DD] hover:bg-[#007cbd] active:scale-[0.99] text-white font-black py-4 px-4 rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer text-base disabled:opacity-75 uppercase tracking-wider"
               >
                 {loading ? (
                   <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                 ) : (
                   <>
-                    <CheckCircle className="w-5 h-5" />
-                    <span>Register & Login</span>
+                    <Send className="w-5 h-5" />
+                    <span>Register & Send OTP</span>
                   </>
                 )}
               </button>
             </form>
-          ) : loginMode === 'otp' ? (
-            /* OTP Login Form */
-            <div className="space-y-5">
+          ) : (
+            /* Stage 1 (Login): Mobile Number Input */
+            <form onSubmit={handleSendOtp} className="space-y-6">
               <h2 className="text-2xl font-bold text-slate-800 mb-2 text-center">Login with Mobile</h2>
               <p className="text-xs font-semibold text-slate-400 text-center uppercase tracking-wider -mt-3">
-                Contractors OTP Verification
+                OTP Verification
               </p>
 
-              {!otpSent ? (
-                /* Step 1: Send OTP */
-                <form onSubmit={handleSendOtp} className="space-y-5">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Mobile Number
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                        <Phone className="w-5 h-5" />
-                      </span>
-                      <input
-                        type="tel"
-                        pattern="[0-9]{10}"
-                        maxLength="10"
-                        value={mobileNumber}
-                        onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
-                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
-                        placeholder="Enter registered mobile number"
-                        required
-                      />
-                    </div>
-                  </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Mobile Number
+                </label>
+                <div className="relative flex items-center">
+                  <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-500 font-extrabold text-base border-r border-slate-200 pr-3 h-full">
+                    +91
+                  </span>
+                  <input
+                    type="tel"
+                    maxLength="10"
+                    value={mobileNumber}
+                    onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
+                    className="w-full pl-16 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all text-xl font-bold"
+                    placeholder="9876543210"
+                    required
+                  />
+                </div>
+              </div>
 
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full bg-brand-blue hover:bg-brand-blue/95 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-brand-blue/25 transition-all flex items-center justify-center gap-2 cursor-pointer text-base disabled:opacity-75"
-                  >
-                    {loading ? (
-                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4" />
-                        <span>Send OTP Verification Code</span>
-                      </>
-                    )}
-                  </button>
-                </form>
-              ) : (
-                /* Step 2: Verify OTP */
-                <form onSubmit={handleVerifyOtp} className="space-y-5">
-                  <div className="bg-blue-50/50 p-4 border border-blue-100 rounded-2xl flex justify-between items-center text-xs">
-                    <div>
-                      <span className="text-slate-400 font-bold block uppercase">MOBILE NUMBER</span>
-                      <span className="text-slate-800 font-extrabold">{mobileNumber}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { setOtpSent(false); setOtp(''); setLocalError(''); }}
-                      className="text-brand-blue font-extrabold hover:underline uppercase tracking-wider text-[10px]"
-                    >
-                      Change Number
-                    </button>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Enter 6-Digit OTP Code
-                    </label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                        <Key className="w-5 h-5" />
-                      </span>
-                      <input
-                        type="text"
-                        maxLength="6"
-                        pattern="[0-9]{6}"
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 tracking-[0.2em] text-center font-extrabold focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
-                        placeholder="••••••"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full bg-green-600 hover:bg-green-500 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-green-600/10 hover:shadow-green-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer text-base disabled:opacity-75"
-                  >
-                    {loading ? (
-                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    ) : (
-                      <>
-                        <LogIn className="w-5 h-5" />
-                        <span>Verify & Login</span>
-                      </>
-                    )}
-                  </button>
-                </form>
-              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-[#0093DD] hover:bg-[#007cbd] active:scale-[0.99] text-white font-black py-4.5 px-4 rounded-2xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer text-lg disabled:opacity-75 uppercase tracking-wider"
+              >
+                {loading ? (
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5" />
+                    <span>Send OTP</span>
+                  </>
+                )}
+              </button>
 
               {/* Toggle to Registration */}
               <div className="pt-2 text-center">
@@ -465,94 +572,13 @@ export default function Login() {
                   Register Account Here
                 </button>
               </div>
-            </div>
-          ) : (
-            /* Email Login Form */
-            <form onSubmit={handleEmailSubmit} className="space-y-5">
-              <h2 className="text-2xl font-bold text-slate-800 mb-6 text-center">Admin / Dev Login</h2>
-
-              {/* Email Field */}
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                    <Mail className="w-5 h-5" />
-                  </span>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
-                    placeholder="name@email.com"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Password Field */}
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                  Password
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                    <Key className="w-5 h-5" />
-                  </span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue transition-all"
-                    placeholder="••••••••"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Login Button */}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-brand-blue hover:bg-brand-blue/95 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-brand-blue/20 hover:shadow-brand-blue/30 transition-all flex items-center justify-center gap-2 cursor-pointer text-base disabled:opacity-75"
-              >
-                {loading ? (
-                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                ) : (
-                  <>
-                    <LogIn className="w-5 h-5" />
-                    <span>Login</span>
-                  </>
-                )}
-              </button>
             </form>
           )}
-
-          {/* Quick Sandbox Login Buttons */}
-          <div className="mt-8 pt-6 border-t border-slate-100 text-center">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-              Developer Quick Login
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setTestCredentials('contractor')}
-                className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-slate-700 text-xs font-bold transition-all cursor-pointer"
-              >
-                📝 Mock Contractor
-              </button>
-              <button
-                type="button"
-                onClick={() => setTestCredentials('admin')}
-                className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-slate-700 text-xs font-bold transition-all cursor-pointer"
-              >
-                👑 Master Admin
-              </button>
-            </div>
-          </div>
         </div>
       </div>
+
+      {/* recaptcha container for Firebase invisible recaptcha */}
+      <div id="recaptcha-container" className="mt-4"></div>
     </div>
   );
 }

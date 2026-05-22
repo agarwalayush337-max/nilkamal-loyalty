@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { 
-  signInWithEmailAndPassword, 
   signOut as firebaseSignOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
@@ -25,8 +24,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
-  // Dev mode role override (hot-swapping dashboards)
-  const [devRoleOverride, setDevRoleOverride] = useState(null);
+
 
   // Persistent points for the mock contractor (defaults to 2450)
   const [mockContractorPoints, setMockContractorPoints] = useState(() => {
@@ -67,9 +65,15 @@ export function AuthProvider({ children }) {
     }));
   }, [mockContractorPoints]);
 
-  // Get active role, factoring in developer override
+  // Keep mock user session in localStorage in sync when userData updates in mock mode
+  useEffect(() => {
+    if (user?.isMock && userData) {
+      localStorage.setItem('nilkamal_mock_user', JSON.stringify(userData));
+    }
+  }, [userData, user?.isMock]);
+
+  // Get active role
   const getActiveRole = () => {
-    if (devRoleOverride) return devRoleOverride;
     return userData?.role || null;
   };
 
@@ -78,21 +82,9 @@ export function AuthProvider({ children }) {
     return saved ? JSON.parse(saved) : null;
   };
 
-  // Get active user data, yielding the proper profile even during role-swaps
+  // Get active user data
   const getActiveUserData = () => {
-    if (devRoleOverride) {
-      if (devRoleOverride === 'contractor') {
-        return {
-          ...mockUsers.contractor,
-          totalPoints: mockContractorPoints,
-          activeGoal: getMockActiveGoal()
-        };
-      } else {
-        return mockUsers.admin;
-      }
-    }
-    
-    // Non-overridden fallback for mock contractor points synchronization
+    // Fallback for mock contractor points synchronization
     if (user?.isMock && userData?.role === 'contractor') {
       if (user.uid === 'mock-contractor-uid') {
         return {
@@ -170,6 +162,9 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       if (firebaseUser) {
+        // Clear mobile/mock sessions when a firebaseUser is logged in directly
+        localStorage.removeItem('nilkamal_logged_in_mobile_uid');
+        localStorage.removeItem('nilkamal_mock_user');
         setUser(firebaseUser);
         try {
           // Fetch user data from Firestore
@@ -179,23 +174,105 @@ export function AuthProvider({ children }) {
           if (userDocSnap.exists()) {
             setUserData(userDocSnap.data());
           } else {
-            // Document doesn't exist, create a default contractor document
-            const defaultData = {
-              name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
-              role: 'contractor',
-              totalPoints: 0
-            };
-            await setDoc(userDocRef, defaultData);
-            setUserData(defaultData);
+            // Self-healing migration / matching by phone number
+            let matchedData = null;
+            let matchedId = null;
+            if (firebaseUser.phoneNumber) {
+              const last10 = firebaseUser.phoneNumber.replace(/\D/g, '').slice(-10);
+              const usersRef = collection(db, 'users');
+              const q = query(usersRef, where('mobileNumber', '==', last10));
+              const querySnapshot = await getDocs(q);
+              if (!querySnapshot.empty) {
+                const docSnap = querySnapshot.docs[0];
+                matchedData = docSnap.data();
+                matchedId = docSnap.id;
+              }
+            }
+
+            if (matchedData) {
+              // Copy data to new UID and delete old document
+              const updatedData = { ...matchedData, uid: firebaseUser.uid };
+              await setDoc(userDocRef, updatedData);
+              setUserData(updatedData);
+
+              if (matchedId !== firebaseUser.uid) {
+                // Delete old doc
+                const { deleteDoc } = await import('firebase/firestore');
+                await deleteDoc(doc(db, 'users', matchedId));
+
+                // Migrate claims
+                const claimsRef = collection(db, 'claims');
+                const claimsQ = query(claimsRef, where('contractorId', '==', matchedId));
+                const claimsSnap = await getDocs(claimsQ);
+                for (const claimD of claimsSnap.docs) {
+                  await updateDoc(doc(db, 'claims', claimD.id), { contractorId: firebaseUser.uid });
+                }
+
+                // Migrate redemptions
+                const redemptionsRef = collection(db, 'redemptions');
+                const redemptionsQ = query(redemptionsRef, where('contractorId', '==', matchedId));
+                const redemptionsSnap = await getDocs(redemptionsQ);
+                for (const redD of redemptionsSnap.docs) {
+                  await updateDoc(doc(db, 'redemptions', redD.id), { contractorId: firebaseUser.uid });
+                }
+                console.log(`Successfully migrated user ${matchedId} to Firebase UID ${firebaseUser.uid}`);
+              }
+            } else {
+              // Document doesn't exist, create a default contractor document
+              const defaultData = {
+                uid: firebaseUser.uid,
+                name: firebaseUser.displayName || (firebaseUser.phoneNumber || 'User'),
+                role: 'contractor',
+                totalPoints: 0,
+                mobileNumber: firebaseUser.phoneNumber ? firebaseUser.phoneNumber.replace(/\D/g, '').slice(-10) : ''
+              };
+              await setDoc(userDocRef, defaultData);
+              setUserData(defaultData);
+            }
           }
         } catch (err) {
           console.error("Error fetching user data from Firestore:", err);
           setError("Failed to fetch user profile. Firestore permissions might need checking.");
         }
       } else {
-        setUser(null);
-        setUserData(null);
-        setDevRoleOverride(null);
+        // If no standard firebase auth user, check for mock/mobile persisted session
+        const savedMockUser = localStorage.getItem('nilkamal_mock_user');
+        const mobileUid = localStorage.getItem('nilkamal_logged_in_mobile_uid');
+
+        if (savedMockUser) {
+          const parsed = JSON.parse(savedMockUser);
+          setUser({ uid: parsed.uid, email: parsed.email, isMock: true });
+          setUserData(parsed);
+          if (parsed.role === 'contractor') {
+            if (parsed.uid === 'mock-contractor-uid') {
+              const rameshPts = parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10);
+              setMockContractorPoints(rameshPts);
+            } else {
+              setMockContractorPoints(parsed.totalPoints || 0);
+            }
+          }
+        } else if (mobileUid) {
+          try {
+            const userDocRef = doc(db, 'users', mobileUid);
+            const userDocSnap = await getDoc(userDocRef);
+            if (userDocSnap.exists()) {
+              const data = { uid: userDocSnap.id, ...userDocSnap.data() };
+              setUser({ uid: mobileUid, email: data.email || `${data.mobileNumber}@nilkamal.com` });
+              setUserData(data);
+            } else {
+              localStorage.removeItem('nilkamal_logged_in_mobile_uid');
+              setUser(null);
+              setUserData(null);
+            }
+          } catch (err) {
+            console.error("Error fetching persisted mobile user:", err);
+            setUser(null);
+            setUserData(null);
+          }
+        } else {
+          setUser(null);
+          setUserData(null);
+        }
       }
       setLoading(false);
     });
@@ -203,75 +280,21 @@ export function AuthProvider({ children }) {
     return unsubscribe;
   }, []);
 
-  // Login Function
-  const login = async (email, password) => {
-    setError('');
-    setLoading(true);
 
-    // Fallback: If Firebase not configured, or if we use the test emails
-    if (!isFirebaseConfigured() || email.endsWith('@test.com')) {
-      const role = email.includes('admin') ? 'admin' : 'contractor';
-      const mockProfile = mockUsers[role];
-      
-      setUser({ uid: mockProfile.uid, email: mockProfile.email, isMock: true });
-      setUserData(mockProfile);
-      localStorage.setItem('nilkamal_mock_user', JSON.stringify(mockProfile));
-      if (role === 'contractor') {
-        const rameshPts = parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10);
-        setMockContractorPoints(rameshPts);
-      }
-      setLoading(false);
-      return { success: true, role };
-    }
-
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const firebaseUser = userCredential.user;
-      
-      // Fetch user profile from Firestore
-      const userDocRef = doc(db, 'users', firebaseUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      let role = 'contractor';
-      
-      if (userDocSnap.exists()) {
-        const data = userDocSnap.data();
-        setUserData(data);
-        role = data.role;
-      } else {
-        const defaultData = {
-          name: firebaseUser.email.split('@')[0],
-          role: 'contractor',
-          totalPoints: 0
-        };
-        await setDoc(userDocRef, defaultData);
-        setUserData(defaultData);
-      }
-      
-      setLoading(false);
-      return { success: true, role };
-    } catch (err) {
-      setLoading(false);
-      let msg = err.message;
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        msg = 'Invalid email or password.';
-      } else if (err.code === 'auth/invalid-credential') {
-        msg = 'Invalid login credentials.';
-      }
-      setError(msg);
-      throw new Error(msg);
-    }
-  };
 
   // Sign Out Function
   const logout = async () => {
     setError('');
     setLoading(true);
-    setDevRoleOverride(null);
+
+    // Clear all persisted sessions
+    localStorage.removeItem('nilkamal_logged_in_mobile_uid');
+    localStorage.removeItem('nilkamal_mock_user');
+    localStorage.removeItem('nilkamal_mock_active_goal');
 
     if (user?.isMock) {
       setUser(null);
       setUserData(null);
-      localStorage.removeItem('nilkamal_mock_user');
       setLoading(false);
       return;
     }
@@ -287,15 +310,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Toggle Dev Role Switcher
-  const toggleDevRole = () => {
-    const currentEffectiveRole = getActiveRole();
-    if (currentEffectiveRole === 'admin') {
-      setDevRoleOverride('contractor');
-    } else {
-      setDevRoleOverride('admin');
-    }
-  };
+
 
   // Add/Subtract Points (Works for both Firebase & local Mock storage)
   const updateContractorPoints = async (contractorId, pointsToAdd) => {
@@ -428,9 +443,21 @@ export function AuthProvider({ children }) {
         lastLoginTime: Date.now()
       };
 
+      const defaultAdmin = {
+        uid: 'mock-admin-uid',
+        email: 'admin@test.com',
+        name: 'Nilkamal Master Admin',
+        role: 'admin',
+        mobileNumber: '9876543211',
+        totalPoints: 0,
+        lastLoginTime: Date.now()
+      };
+
       let found = list.find(c => c.mobileNumber === normalizedMobile);
       if (!found && normalizedMobile === '9876543210') {
         found = defaultContractor;
+      } else if (!found && normalizedMobile === '9876543211') {
+        found = defaultAdmin;
       }
 
       if (!found) {
@@ -442,7 +469,7 @@ export function AuthProvider({ children }) {
 
       found.lastLoginTime = Date.now();
       const updatedList = list.map(c => c.uid === found.uid ? found : c);
-      if (!list.find(c => c.uid === found.uid) && found.uid !== 'mock-contractor-uid') {
+      if (!list.find(c => c.uid === found.uid) && found.uid !== 'mock-contractor-uid' && found.uid !== 'mock-admin-uid') {
         updatedList.push(found);
       }
       localStorage.setItem('nilkamal_mock_contractors_list', JSON.stringify(updatedList));
@@ -454,16 +481,16 @@ export function AuthProvider({ children }) {
       if (found.uid === 'mock-contractor-uid') {
         const rameshPts = parseInt(localStorage.getItem('nilkamal_mock_contractor_points') || '2450', 10);
         setMockContractorPoints(rameshPts);
-      } else {
+      } else if (found.role === 'contractor') {
         setMockContractorPoints(found.totalPoints || 0);
       }
       setLoading(false);
-      return { success: true, role: 'contractor' };
+      return { success: true, role: found.role || 'contractor' };
     }
 
     try {
       const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('mobileNumber', '==', normalizedMobile), where('role', '==', 'contractor'));
+      const q = query(usersRef, where('mobileNumber', '==', normalizedMobile));
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
@@ -482,8 +509,10 @@ export function AuthProvider({ children }) {
 
       setUser({ uid: userDoc.id, email: foundData.email || `${normalizedMobile}@nilkamal.com` });
       setUserData(foundData);
+      localStorage.setItem('nilkamal_logged_in_mobile_uid', userDoc.id);
+      localStorage.removeItem('nilkamal_mock_user');
       setLoading(false);
-      return { success: true, role: 'contractor' };
+      return { success: true, role: foundData.role || 'contractor' };
     } catch (err) {
       setLoading(false);
       setError(err.message);
@@ -513,7 +542,7 @@ export function AuthProvider({ children }) {
     if (isMockMode) {
       const savedContractors = localStorage.getItem('nilkamal_mock_contractors_list');
       const list = savedContractors ? JSON.parse(savedContractors) : [];
-      if (list.find(c => c.mobileNumber === normalizedMobile) || normalizedMobile === '9876543210') {
+      if (list.find(c => c.mobileNumber === normalizedMobile) || normalizedMobile === '9876543210' || normalizedMobile === '9876543211') {
         setLoading(false);
         const msg = "Mobile number already registered.";
         setError(msg);
@@ -548,6 +577,8 @@ export function AuthProvider({ children }) {
 
       setUser({ uid: newUid, email: `${normalizedMobile}@nilkamal.com` });
       setUserData(newContractor);
+      localStorage.setItem('nilkamal_logged_in_mobile_uid', newUid);
+      localStorage.removeItem('nilkamal_mock_user');
       setLoading(false);
       return { success: true, role: 'contractor' };
     } catch (err) {
@@ -598,12 +629,9 @@ export function AuthProvider({ children }) {
     userData: getActiveUserData(),
     loading,
     error,
-    login,
     logout,
     activeRole: getActiveRole(),
     isMock: user?.isMock || false,
-    devRoleOverride,
-    toggleDevRole,
     updateContractorPoints,
     updateActiveGoal,
     setUserData,

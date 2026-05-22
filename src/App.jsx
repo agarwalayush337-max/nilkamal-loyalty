@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './views/Login';
 import ContractorDashboard from './views/ContractorDashboard';
 import AdminDashboard from './views/AdminDashboard';
-import DevRoleSwitcher from './components/DevRoleSwitcher';
 
 // Route guard for RBAC (Role-Based Access Control)
 function ProtectedRoute({ children, requiredRole }) {
@@ -82,9 +81,6 @@ function App() {
           <Route path="/" element={<RootRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        
-        {/* Floating Developer role toggle (Only mounts when user is logged in) */}
-        <DevRoleSwitcher />
       </BrowserRouter>
     </AuthProvider>
   );

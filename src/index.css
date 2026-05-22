@@ -22,3 +22,13 @@
   animation: custom-blink 1.5s infinite ease-in-out;
 }
 
+/* Remove default browser spinners from number inputs */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+

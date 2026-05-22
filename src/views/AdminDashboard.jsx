@@ -129,7 +129,7 @@ export default function AdminDashboard() {
         type: 'claim',
         timestamp: getTimestampMs(c.timestamp),
         title: `Submitted Bill: ${c.billNumber}`,
-        description: `Amount: ₹${c.amount.toLocaleString()} | Running Feet: ${c.runningFeet} RFT | Status: ${c.status.toUpperCase()}`,
+        description: `Amount: ₹${c.amount.toLocaleString()} | Running Feet: ${c.runningFeet} RFT | Status: ${c.status.toUpperCase()}${c.billDate ? ` | Bill Date: ${formatDate(c.billDate)}` : ''}`,
         points: c.status === 'approved' ? `+${c.points} Pts` : c.status === 'pending' ? `+${c.points} Pts (Pending)` : '0 Pts (Rejected)',
         imageUrl: c.imageUrl,
         status: c.status,
@@ -1023,6 +1023,7 @@ export default function AdminDashboard() {
                               }
                             </b>
                           </span>
+                          <span>Bill Date: <b className="text-slate-800">{claim.billDate ? formatDate(claim.billDate) : 'N/A'}</b></span>
                         </div>
                         <p className="text-[10px] text-slate-400">
                           Submitted: {formatDateTime(claim.timestamp)}
@@ -1574,6 +1575,16 @@ export default function AdminDashboard() {
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-2">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Contractor UID</span>
                     <span className="text-xs font-semibold text-slate-700 block break-all">{selectedClaim.contractorId}</span>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Bill Details</span>
+                    <span className="text-xs font-semibold text-slate-700 block">
+                      Bill Date: <b className="text-slate-900">{selectedClaim.billDate ? formatDate(selectedClaim.billDate) : 'N/A'}</b>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-semibold block uppercase">
+                      Uploaded: {formatDateTime(selectedClaim.timestamp)}
+                    </span>
                   </div>
 
                   {/* RFT and Points Calculation Card */}

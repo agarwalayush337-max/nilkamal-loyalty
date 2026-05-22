@@ -77,6 +77,7 @@ const translations = {
     noteRft: "Note: You earn exactly 1 Point for every 1 Running Foot (RFT).",
     enterAmt: "3. Enter Bill Amount (₹) *",
     billNumOpt: "4. Bill Number (Optional)",
+    billDateLabel: "5. Bill Date *",
     sendBillNow: "Send Bill Now",
     submitted: "SUBMITTED!",
     waitApproval: "Wait for master approval to get points."
@@ -153,6 +154,7 @@ const translations = {
     noteRft: "नोट: आप प्रत्येक 1 रनिंग फुट (RFT) के लिए ठीक 1 पॉइंट अर्जित करते हैं।",
     enterAmt: "3. बिल राशि (₹) दर्ज करें *",
     billNumOpt: "4. बिल संख्या (वैकल्पिक)",
+    billDateLabel: "5. बिल दिनांक *",
     sendBillNow: "अभी बिल भेजें",
     submitted: "सबमिट हो गया!",
     waitApproval: "पॉइंट्स प्राप्त करने के लिए मुख्य मंजूरी की प्रतीक्षा करें।"
@@ -199,6 +201,7 @@ export default function ContractorDashboard() {
   const [billNumber, setBillNumber] = useState('');
   const [amount, setAmount] = useState('');
   const [runningFeet, setRunningFeet] = useState('');
+  const [billDate, setBillDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [billImage, setBillImage] = useState(null);
   const [billImagePreview, setBillImagePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -454,7 +457,8 @@ export default function ContractorDashboard() {
       points: calculatedPoints,
       imageUrl: billImagePreview || '',
       status: 'pending',
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      billDate: billDate || new Date().toISOString().split('T')[0]
     };
 
     if (isMock) {
@@ -473,6 +477,7 @@ export default function ContractorDashboard() {
         setBillNumber('');
         setAmount('');
         setRunningFeet('');
+        setBillDate(new Date().toISOString().split('T')[0]);
         setBillImage(null);
         setBillImagePreview(null);
         loadClaims();
@@ -496,6 +501,7 @@ export default function ContractorDashboard() {
       setBillNumber('');
       setAmount('');
       setRunningFeet('');
+      setBillDate(new Date().toISOString().split('T')[0]);
       setBillImage(null);
       setBillImagePreview(null);
       loadClaims();
@@ -517,6 +523,7 @@ export default function ContractorDashboard() {
       setBillNumber('');
       setAmount('');
       setRunningFeet('');
+      setBillDate(new Date().toISOString().split('T')[0]);
       setBillImage(null);
       setBillImagePreview(null);
       loadClaims();
@@ -803,6 +810,11 @@ export default function ContractorDashboard() {
                           <p className="text-xs text-slate-500 font-semibold">
                             {t.amt}: ₹{claim.amount.toLocaleString()} | {claim.runningFeet || 0} {t.rft}
                           </p>
+                          {claim.billDate && (
+                            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                              {t.date}: {formatDate(claim.billDate)}
+                            </p>
+                          )}
                         </div>
                       </div>
                       
@@ -965,7 +977,7 @@ export default function ContractorDashboard() {
             </div>
 
             {/* Modal Body / Form */}
-            <form onSubmit={handleSubmitClaim} className="p-6 overflow-y-auto space-y-6 flex-1">
+            <form onSubmit={handleSubmitClaim} className="p-6 overflow-y-auto space-y-4 flex-1">
               {submitSuccess ? (
                 <div className="py-12 text-center space-y-4">
                   <div className="w-20 h-20 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto border-2 border-green-200">
@@ -976,15 +988,15 @@ export default function ContractorDashboard() {
                 </div>
               ) : (
                 <>
-                  {/* Photo Upload Area - HUGE BUTTON */}
+                  {/* Photo Upload Area - COMPACT */}
                   <div>
-                    <label className="block text-sm font-extrabold text-slate-700 uppercase mb-2">
+                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
                       {t.takePhoto}
                     </label>
                     <div className="relative">
                       {billImagePreview ? (
-                        <div className="relative rounded-2xl overflow-hidden border-2 border-brand-blue max-h-60 flex justify-center bg-slate-900">
-                          <img src={billImagePreview} alt="Bill Preview" className="max-h-60 object-contain" />
+                        <div className="relative rounded-xl overflow-hidden border border-brand-blue max-h-28 flex justify-center bg-slate-900">
+                          <img src={billImagePreview} alt="Bill Preview" className="max-h-28 object-contain" />
                           <button
                             type="button"
                             onClick={() => {
@@ -993,16 +1005,18 @@ export default function ContractorDashboard() {
                             }}
                             className="absolute top-2 right-2 bg-red-600 text-white p-1 rounded-full shadow-lg cursor-pointer"
                           >
-                            <X className="w-5 h-5" />
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
                       ) : (
-                        <label className="w-full h-44 border-4 border-dashed border-slate-300 hover:border-brand-blue rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 hover:bg-brand-blue/5">
-                          <Camera className="w-12 h-12 text-slate-400 stroke-[1.5]" />
-                          <span className="text-base font-black text-slate-500 uppercase tracking-wide">
-                            {t.openCamera}
-                          </span>
-                          <span className="text-xs text-slate-400">{t.imageFormat}</span>
+                        <label className="w-full h-20 border-2 border-dashed border-slate-300 hover:border-brand-blue rounded-xl flex flex-row items-center justify-center gap-3 cursor-pointer transition-all bg-slate-50 hover:bg-brand-blue/5 p-3">
+                          <Camera className="w-6 h-6 text-slate-400 stroke-[2]" />
+                          <div className="text-left">
+                            <span className="text-xs font-black text-slate-600 uppercase tracking-wide block">
+                              {t.openCamera}
+                            </span>
+                            <span className="text-[10px] text-slate-400 block">{t.imageFormat}</span>
+                          </div>
                           <input
                             type="file"
                             accept="image/*"
@@ -1017,7 +1031,7 @@ export default function ContractorDashboard() {
 
                   {/* Running Feet - HUGE INPUT (Point Determinant) */}
                   <div>
-                    <label className="block text-sm font-extrabold text-slate-700 uppercase mb-2">
+                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
                       {t.enterRft}
                     </label>
                     <div className="relative">
@@ -1026,29 +1040,26 @@ export default function ContractorDashboard() {
                         inputMode="decimal"
                         value={runningFeet}
                         onChange={(e) => setRunningFeet(e.target.value)}
-                        className="w-full px-4 py-4 bg-slate-100 border-2 border-slate-200 focus:border-brand-blue focus:bg-white rounded-2xl text-slate-900 text-2xl font-black focus:outline-none transition-all placeholder:text-slate-300"
+                        className="w-full px-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xl font-black focus:outline-none transition-all placeholder:text-slate-300"
                         placeholder="0.00"
                         required
                       />
                     </div>
                     {runningFeet && (
-                      <div className="mt-3 bg-brand-blue/10 border border-brand-blue/20 rounded-2xl p-3.5 text-center shadow-inner">
-                        <span className="text-[10px] font-black text-brand-blue uppercase tracking-widest block mb-0.5">{t.estPoints}</span>
-                        <span className="text-3xl font-black text-slate-900 block">+{Math.round(parseFloat(runningFeet) || 0)} {t.pts}</span>
+                      <div className="mt-2 bg-brand-blue/10 border border-brand-blue/20 rounded-xl p-2.5 text-center shadow-inner">
+                        <span className="text-[9px] font-black text-brand-blue uppercase tracking-widest block mb-0.5">{t.estPoints}</span>
+                        <span className="text-xl font-black text-slate-900 block">+{Math.round(parseFloat(runningFeet) || 0)} {t.pts}</span>
                       </div>
                     )}
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 pl-1">
-                      {t.noteRft}
-                    </p>
                   </div>
 
                   {/* Bill Amount - HUGE INPUT */}
                   <div>
-                    <label className="block text-sm font-extrabold text-slate-700 uppercase mb-2">
+                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
                       {t.enterAmt}
                     </label>
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-2xl font-black text-slate-400">
+                      <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-xl font-black text-slate-400">
                         ₹
                       </span>
                       <input
@@ -1056,24 +1067,24 @@ export default function ContractorDashboard() {
                         inputMode="decimal"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
-                        className="w-full pl-10 pr-4 py-4 bg-slate-100 border-2 border-slate-200 focus:border-brand-blue focus:bg-white rounded-2xl text-slate-900 text-2xl font-black focus:outline-none transition-all placeholder:text-slate-300"
+                        className="w-full pl-10 pr-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xl font-black focus:outline-none transition-all placeholder:text-slate-300"
                         placeholder="0.00"
                         required
                       />
                     </div>
                   </div>
 
-                  {/* Bill Number - OPTIONAL */}
+                  {/* Bill Date - REQUIRED */}
                   <div>
-                    <label className="block text-sm font-extrabold text-slate-700 uppercase mb-2">
-                      {t.billNumOpt}
+                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
+                      {t.billDateLabel}
                     </label>
                     <input
-                      type="text"
-                      value={billNumber}
-                      onChange={(e) => setBillNumber(e.target.value)}
-                      className="w-full px-4 py-3.5 bg-slate-100 border-2 border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 font-bold focus:outline-none transition-all placeholder:text-slate-300"
-                      placeholder="e.g. BIL-12345"
+                      type="date"
+                      value={billDate}
+                      onChange={(e) => setBillDate(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 font-bold focus:outline-none transition-all"
+                      required
                     />
                   </div>
 
@@ -1081,7 +1092,7 @@ export default function ContractorDashboard() {
                   <button
                     type="submit"
                     disabled={uploading}
-                    className="w-full bg-green-600 hover:bg-green-500 active:scale-95 text-white font-black py-4 px-6 rounded-2xl shadow-xl shadow-green-700/10 hover:shadow-green-700/20 text-lg uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-75"
+                    className="w-full bg-green-600 hover:bg-green-500 active:scale-95 text-white font-black py-3.5 px-6 rounded-xl shadow-xl shadow-green-700/10 hover:shadow-green-700/20 text-base uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-75"
                   >
                     {uploading ? (
                       <div className="w-7 h-7 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
