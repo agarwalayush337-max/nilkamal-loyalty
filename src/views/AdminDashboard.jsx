@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, Check, X, ShieldAlert, Award, FileText, Image as ImageIcon, CheckCircle, AlertCircle, RefreshCw, Plus, Gift, Truck, Users, Edit, Megaphone } from 'lucide-react';
+import { LogOut, Check, X, ShieldAlert, Award, FileText, Image as ImageIcon, CheckCircle, AlertCircle, RefreshCw, Plus, Gift, Truck, Users, Edit, Megaphone, Send } from 'lucide-react';
 import { collection, doc, getDoc, getDocs, updateDoc, query, where, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -79,6 +79,12 @@ export default function AdminDashboard() {
   const [creatingAnn, setCreatingAnn] = useState(false);
   const [annCreateSuccess, setAnnCreateSuccess] = useState(false);
   const [annMessage, setAnnMessage] = useState('');
+
+  // Custom Push Notification States
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifMessage, setNotifMessage] = useState('');
+  const [sendingNotif, setSendingNotif] = useState(false);
+  const [notifSuccessMsg, setNotifSuccessMsg] = useState('');
 
 
   const formatDate = (timestamp) => {
@@ -1067,11 +1073,11 @@ export default function AdminDashboard() {
         )}
 
         {/* Navigation Tabs */}
-        <div className="flex flex-wrap gap-2 mb-6">
+        <div className="grid grid-cols-2 gap-2 md:flex md:flex-row md:flex-wrap mb-6">
           <button
             type="button"
             onClick={() => setActiveTab('approvals')}
-            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`w-full md:w-auto flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'approvals'
                 ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
                 : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
@@ -1083,7 +1089,7 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('redemptions')}
-            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`w-full md:w-auto flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'redemptions'
                 ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
                 : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
@@ -1095,7 +1101,7 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('contractors')}
-            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`w-full md:w-auto flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'contractors'
                 ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
                 : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
@@ -1107,7 +1113,7 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('catalog')}
-            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`w-full md:w-auto flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'catalog'
                 ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
                 : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
@@ -1119,7 +1125,7 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={() => setActiveTab('announcements')}
-            className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            className={`col-span-2 md:col-span-1 w-full md:w-auto flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'announcements'
                 ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10'
                 : 'bg-white border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50 shadow-sm'
@@ -2234,6 +2240,68 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 )}
+
+                {/* Send Direct Push Notification Form */}
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                  <h5 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <Send className="w-4 h-4 text-brand-blue" />
+                    <span>✉️ Send Direct Push Notification</span>
+                  </h5>
+                  <p className="text-[11px] text-slate-500 font-semibold leading-relaxed">
+                    This notification will instantly pop up on the contractor's phone screen and display in their notification drawer.
+                  </p>
+                  
+                  {notifSuccessMsg && (
+                    <div className="p-2.5 bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-xl flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                      <span>{notifSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Notification Title</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Points Updated!"
+                        value={notifTitle}
+                        onChange={(e) => setNotifTitle(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-xs font-bold text-slate-800 placeholder:text-slate-350 focus:outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Message Body</label>
+                      <textarea
+                        rows="2"
+                        placeholder="e.g. We have approved 150 points for your latest bill submission. Keep up the great work!"
+                        value={notifMessage}
+                        onChange={(e) => setNotifMessage(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-xs font-bold text-slate-800 placeholder:text-slate-350 focus:outline-none transition-all resize-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={sendingNotif || !notifTitle.trim() || !notifMessage.trim()}
+                      onClick={async () => {
+                        setSendingNotif(true);
+                        try {
+                          await publishNotification(c.uid, notifTitle.trim(), notifMessage.trim());
+                          setNotifSuccessMsg('Notification sent successfully!');
+                          setNotifTitle('');
+                          setNotifMessage('');
+                          setTimeout(() => setNotifSuccessMsg(''), 3000);
+                        } catch (err) {
+                          console.error("Failed to send custom notification:", err);
+                        } finally {
+                          setSendingNotif(false);
+                        }
+                      }}
+                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-sm border border-slate-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {sendingNotif ? 'Sending...' : 'Send Push Notification'}
+                    </button>
+                  </div>
+                </div>
 
                 {/* Timeline / Activity History */}
                 <div className="space-y-4">

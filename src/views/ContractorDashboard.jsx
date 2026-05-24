@@ -244,6 +244,10 @@ export default function ContractorDashboard() {
   // Toast notifications state
   const [toasts, setToasts] = useState([]);
 
+  // Refs to prevent duplicate notifications
+  const notifiedIdsRef = useRef(new Set());
+  const firstNotificationsLoadRef = useRef(true);
+
   // Claims history state
   const [claims, setClaims] = useState([]);
   const [loadingClaims, setLoadingClaims] = useState(true);
@@ -376,6 +380,180 @@ export default function ContractorDashboard() {
     }
   };
 
+  // Load mock notifications for Mock Mode
+  const loadNotifications = () => {
+    if (!user) return;
+    try {
+      const saved = localStorage.getItem('nilkamal_mock_notifications');
+      const allNotifs = saved ? JSON.parse(saved) : [];
+      const myNotifs = allNotifs.filter(n => n.contractorId === user.uid);
+      
+      myNotifs.forEach(notif => {
+        if (!notifiedIdsRef.current.has(notif.id)) {
+          notifiedIdsRef.current.add(notif.id);
+          if (!firstNotificationsLoadRef.current) {
+            showNotification(notif.title, notif.message);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Error loading mock notifications:", err);
+    } finally {
+      firstNotificationsLoadRef.current = false;
+    }
+  };
+
+  // Load mock announcements for Mock Mode
+  const loadAnnouncements = async () => {
+    setLoadingAnnouncements(true);
+    try {
+      const saved = localStorage.getItem('nilkamal_mock_announcements');
+      const allAnn = saved ? JSON.parse(saved) : [];
+      allAnn.sort((a, b) => b.timestamp - a.timestamp);
+      setAnnouncements(allAnn);
+    } catch (err) {
+      console.error("Error loading mock announcements:", err);
+    } finally {
+      setLoadingAnnouncements(false);
+    }
+  };
+
+  const showNotification = (title, message) => {
+    const id = Date.now() + Math.random().toString();
+    setToasts(prev => [...prev, { id, title, message }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 5000);
+
+    if (Notification.permission === 'granted') {
+      try {
+        new Notification(title, { body: message });
+      } catch (err) {
+        console.error("Browser notification failed:", err);
+      }
+    }
+  };
+
+  const parseHindiSpeech = (transcript) => {
+    const lowercase = transcript.toLowerCase();
+    let parsedRft = '';
+    let parsedPlace = '';
+    let parsedDate = '';
+    let parsedAmount = '';
+
+    const rftRegex = /(\d+(?:\.\d+)?)\s*(?:ft|feet|fit|rft|r\s*feet|रनिंग\s*(?:फीट|फिट|फुट)|फीट|फिट|फुट|रनिंग\s*फीट)/i;
+    const rftMatch = lowercase.match(rftRegex);
+    if (rftMatch) {
+      parsedRft = rftMatch[1];
+    } else {
+      const malRegex = /(\d+(?:\.\d+)?)\s*(?:maal|mal|माल|मॉल)/i;
+      const malMatch = lowercase.match(malRegex);
+      if (malMatch) {
+        parsedRft = malMatch[1];
+      }
+    }
+
+    const amountRegex = /(\d+(?:\.\d+)?)\s*(?:rupaye|rupee|rupees|rupe|rs|रुपये|रुपए|रुपया|रू|रूपए)/i;
+    const amountMatch = lowercase.match(amountRegex);
+    if (amountMatch) {
+      parsedAmount = amountMatch[1];
+    }
+
+    const dateRegex = /(\d{1,2})\s*(?:tarik|tarikh|tariq|तारीख|तारीक|तारीख़|तारीक़|तारिक)/i;
+    const dateMatch = lowercase.match(dateRegex);
+    if (dateMatch) {
+      const day = parseInt(dateMatch[1], 10);
+      if (day >= 1 && day <= 31) {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const dayStr = String(day).padStart(2, '0');
+        parsedDate = `${year}-${month}-${dayStr}`;
+      }
+    }
+
+    const stopWords = ['ka', 'se', 'ki', 'ko', 'party', 'maal', 'mal', 'lia', 'hai', 'tha', 'ft', 'feet', 'fit', 'rft', 'tarik', 'tarikh', 'tariq', 'hi', 'in', 'का', 'से', 'की', 'को', 'पार्टी', 'माल', 'लिया', 'है', 'था', 'फीट', 'फिट', 'फुट', 'तारीख', 'तारीक', 'तारीख़', 'तारीक़', 'तारिक'];
+    const tokens = lowercase.split(/[\s,\.\?।]+/);
+    const indicators = ['ka', 'se', 'party', 'का', 'से', 'पार्टी'];
+    for (let i = 0; i < tokens.length; i++) {
+      if (indicators.includes(tokens[i]) && i > 0) {
+        const candidate = tokens[i - 1];
+        if (candidate && !stopWords.includes(candidate) && !/\d/.test(candidate) && candidate.length > 2) {
+          parsedPlace = candidate;
+          break;
+        }
+      }
+    }
+
+    if (!parsedPlace) {
+      for (const token of tokens) {
+        if (token && !stopWords.includes(token) && !/\d/.test(token) && token.length > 2) {
+          parsedPlace = token;
+          break;
+        }
+      }
+    }
+
+    if (parsedPlace && /^[a-z]+$/.test(parsedPlace)) {
+      parsedPlace = parsedPlace.charAt(0).toUpperCase() + parsedPlace.slice(1);
+    }
+
+    return {
+      rft: parsedRft,
+      amount: parsedAmount,
+      date: parsedDate,
+      place: parsedPlace
+    };
+  };
+
+  const startSpeechRecognition = () => {
+    setListeningError('');
+    setVoiceTranscript('');
+    
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setListeningError(language === 'en' ? 'Speech recognition is not supported in this browser.' : 'इस ब्राउज़र में स्पीच रिकग्निशन समर्थित नहीं है।');
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'hi-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error:", event);
+      setListeningError(language === 'en' ? 'Error during listening: ' + event.error : 'सुनने के दौरान त्रुटि: ' + event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.onresult = (event) => {
+      const transcriptText = event.results[0][0].transcript;
+      setVoiceTranscript(transcriptText);
+
+      const parsed = parseHindiSpeech(transcriptText);
+      if (parsed.rft) setRunningFeet(parsed.rft);
+      if (parsed.amount) setAmount(parsed.amount);
+      if (parsed.place) setPlace(parsed.place);
+      if (parsed.date) setBillDate(parsed.date);
+    };
+
+    recognition.start();
+  };
+
   const handleSelectGoal = async (goal) => {
     try {
       await updateActiveGoal(user.uid, goal);
@@ -461,11 +639,152 @@ export default function ContractorDashboard() {
     }
   };
 
+  // Notification permissions request on mount
   useEffect(() => {
-    if (user) {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Clear notification flags on user change
+  useEffect(() => {
+    if (notifiedIdsRef.current) notifiedIdsRef.current.clear();
+    firstNotificationsLoadRef.current = true;
+  }, [user]);
+
+  // Real-time updates effect
+  useEffect(() => {
+    if (!user) return;
+
+    if (isMock) {
+      // Mock mode initial load
       loadClaims();
       loadGoals();
       loadRedemptions();
+      loadAnnouncements();
+      loadNotifications();
+
+      // Listen to local changes
+      const handleMockUpdate = () => {
+        loadClaims();
+        loadGoals();
+        loadRedemptions();
+        loadAnnouncements();
+        loadNotifications();
+      };
+      
+      const handleStorageUpdate = (e) => {
+        if (e.key && e.key.startsWith('nilkamal_mock_')) {
+          handleMockUpdate();
+        }
+      };
+
+      window.addEventListener('nilkamal_mock_db_update', handleMockUpdate);
+      window.addEventListener('storage', handleStorageUpdate);
+      return () => {
+        window.removeEventListener('nilkamal_mock_db_update', handleMockUpdate);
+        window.removeEventListener('storage', handleStorageUpdate);
+      };
+    } else {
+      // Firebase real-time listeners
+      setLoadingClaims(true);
+      const claimsRef = collection(db, 'claims');
+      const claimsQ = query(claimsRef, where('contractorId', '==', user.uid));
+      const unsubscribeClaims = onSnapshot(claimsQ, (snapshot) => {
+        const claimsList = [];
+        snapshot.forEach((doc) => {
+          claimsList.push({ id: doc.id, ...doc.data() });
+        });
+        claimsList.sort((a, b) => {
+          const t1 = a.timestamp?.seconds || a.timestamp || 0;
+          const t2 = b.timestamp?.seconds || b.timestamp || 0;
+          return t2 - t1;
+        });
+        setClaims(claimsList);
+        setLoadingClaims(false);
+      }, (err) => {
+        console.error("Claims listener error:", err);
+        setLoadingClaims(false);
+      });
+
+      setLoadingGoals(true);
+      const goalsRef = collection(db, 'goals');
+      const unsubscribeGoals = onSnapshot(goalsRef, (snapshot) => {
+        const goalsList = [];
+        snapshot.forEach((doc) => {
+          goalsList.push({ id: doc.id, ...doc.data() });
+        });
+        goalsList.sort((a, b) => a.pointsRequired - b.pointsRequired);
+        setGoals(goalsList);
+        setLoadingGoals(false);
+      }, (err) => {
+        console.error("Goals listener error:", err);
+        setLoadingGoals(false);
+      });
+
+      setLoadingRedemptions(true);
+      const redemptionsRef = collection(db, 'redemptions');
+      const redemptionsQ = query(redemptionsRef, where('contractorId', '==', user.uid));
+      const unsubscribeRedemptions = onSnapshot(redemptionsQ, (snapshot) => {
+        const redemptionsList = [];
+        snapshot.forEach((doc) => {
+          redemptionsList.push({ id: doc.id, ...doc.data() });
+        });
+        redemptionsList.sort((a, b) => {
+          const t1 = a.timestamp?.seconds || a.timestamp || 0;
+          const t2 = b.timestamp?.seconds || b.timestamp || 0;
+          return t2 - t1;
+        });
+        setRedemptions(redemptionsList);
+        setLoadingRedemptions(false);
+      }, (err) => {
+        console.error("Redemptions listener error:", err);
+        setLoadingRedemptions(false);
+      });
+
+      setLoadingAnnouncements(true);
+      const announcementsRef = collection(db, 'announcements');
+      const unsubscribeAnnouncements = onSnapshot(announcementsRef, (snapshot) => {
+        const list = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() });
+        });
+        list.sort((a, b) => {
+          const t1 = a.timestamp?.seconds || a.timestamp || 0;
+          const t2 = b.timestamp?.seconds || b.timestamp || 0;
+          return t2 - t1;
+        });
+        setAnnouncements(list);
+        setLoadingAnnouncements(false);
+      }, (err) => {
+        console.error("Announcements listener error:", err);
+        setLoadingAnnouncements(false);
+      });
+
+      // Firebase notifications listener
+      const notificationsRef = collection(db, 'notifications');
+      const notificationsQ = query(notificationsRef, where('contractorId', '==', user.uid));
+      
+      let isInitial = true;
+      const unsubscribeNotifications = onSnapshot(notificationsQ, (snapshot) => {
+        if (!isInitial) {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data();
+              showNotification(data.title, data.message);
+            }
+          });
+        }
+        isInitial = false;
+      });
+
+      return () => {
+        unsubscribeClaims();
+        unsubscribeGoals();
+        unsubscribeRedemptions();
+        unsubscribeAnnouncements();
+        unsubscribeNotifications();
+      };
     }
   }, [user, isMock]);
 
@@ -503,7 +822,8 @@ export default function ContractorDashboard() {
       imageUrl: billImagePreview || '',
       status: 'pending',
       timestamp: Date.now(),
-      billDate: billDate || new Date().toISOString().split('T')[0]
+      billDate: billDate || new Date().toISOString().split('T')[0],
+      place: place.trim()
     };
 
     if (isMock) {
@@ -522,6 +842,9 @@ export default function ContractorDashboard() {
         setBillNumber('');
         setAmount('');
         setRunningFeet('');
+        setPlace('');
+        setVoiceTranscript('');
+        setListeningError('');
         setBillDate(new Date().toISOString().split('T')[0]);
         setBillImage(null);
         setBillImagePreview(null);
@@ -546,6 +869,9 @@ export default function ContractorDashboard() {
       setBillNumber('');
       setAmount('');
       setRunningFeet('');
+      setPlace('');
+      setVoiceTranscript('');
+      setListeningError('');
       setBillDate(new Date().toISOString().split('T')[0]);
       setBillImage(null);
       setBillImagePreview(null);
@@ -568,6 +894,9 @@ export default function ContractorDashboard() {
       setBillNumber('');
       setAmount('');
       setRunningFeet('');
+      setPlace('');
+      setVoiceTranscript('');
+      setListeningError('');
       setBillDate(new Date().toISOString().split('T')[0]);
       setBillImage(null);
       setBillImagePreview(null);
@@ -626,7 +955,7 @@ export default function ContractorDashboard() {
       </header>
 
       {/* Main Content (Mobile Optimized) */}
-      <main className="max-w-md w-full mx-auto p-4 flex-1 flex flex-col gap-6">
+      <main className="max-w-md w-full mx-auto p-4 pb-28 flex-1 flex flex-col gap-6">
         
         {activeTab === 'dashboard' && (
           <>
@@ -816,6 +1145,48 @@ export default function ContractorDashboard() {
           </div>
         )}
 
+        {activeTab === 'updates' && (
+          <div className="space-y-4 pb-20">
+            <h3 className="text-lg font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <Megaphone className="w-5 h-5 text-brand-blue" />
+              <span>{language === 'en' ? 'Announcements & Updates' : 'घोषणाएँ और अपडेट'}</span>
+            </h3>
+
+            {loadingAnnouncements ? (
+              <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-400 text-sm font-semibold">
+                {language === 'en' ? 'Loading updates...' : 'अपडेट लोड हो रहे हैं...'}
+              </div>
+            ) : announcements.length === 0 ? (
+              <div className="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-400 text-xs font-semibold">
+                {language === 'en' ? 'No updates published yet.' : 'अभी तक कोई अपडेट प्रकाशित नहीं हुआ है।'}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {announcements.map((ann) => (
+                  <div key={ann.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                    {ann.imageUrl && (
+                      <div className="w-full h-48 bg-slate-50 border-b border-slate-100 overflow-hidden">
+                        <img src={ann.imageUrl} alt={ann.title} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <div className="p-4 space-y-2">
+                      <div className="flex justify-between items-start gap-2">
+                        <h4 className="font-extrabold text-slate-800 text-sm">{ann.title}</h4>
+                        <span className="text-[9px] text-slate-400 font-bold shrink-0 whitespace-nowrap">
+                          {formatDate(ann.timestamp)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 font-medium leading-relaxed whitespace-pre-line">
+                        {ann.content}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'history' && (
           <>
             {/* Past Claims History Section */}
@@ -858,6 +1229,11 @@ export default function ContractorDashboard() {
                           {claim.billDate && (
                             <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
                               {t.date}: {formatDate(claim.billDate)}
+                            </p>
+                          )}
+                          {claim.place && (
+                            <p className="text-[10px] text-slate-450 font-semibold mt-0.5">
+                              📍 {claim.place}
                             </p>
                           )}
                         </div>
@@ -970,11 +1346,11 @@ export default function ContractorDashboard() {
       </main>
 
       {/* Sticky Bottom Tab Bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-250 py-2.5 px-4 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-25 flex justify-around max-w-md mx-auto rounded-t-3xl">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-250 py-2.5 px-2 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-25 flex justify-around max-w-md mx-auto rounded-t-3xl">
         <button
           type="button"
           onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer active:scale-95 ${
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition-all cursor-pointer active:scale-95 ${
             activeTab === 'dashboard' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
           }`}
         >
@@ -985,7 +1361,7 @@ export default function ContractorDashboard() {
         <button
           type="button"
           onClick={() => setActiveTab('rewards')}
-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer active:scale-95 ${
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition-all cursor-pointer active:scale-95 ${
             activeTab === 'rewards' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
           }`}
         >
@@ -995,8 +1371,19 @@ export default function ContractorDashboard() {
 
         <button
           type="button"
+          onClick={() => setActiveTab('updates')}
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition-all cursor-pointer active:scale-95 ${
+            activeTab === 'updates' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
+          }`}
+        >
+          <Megaphone className="w-5 h-5" />
+          <span className="text-[10px] uppercase tracking-wider font-extrabold">{t.tabUpdates}</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('history')}
-          className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all cursor-pointer active:scale-95 ${
+          className={`flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition-all cursor-pointer active:scale-95 ${
             activeTab === 'history' ? 'text-brand-blue font-black scale-105' : 'text-slate-400 hover:text-slate-500 font-bold'
           }`}
         >
@@ -1033,6 +1420,69 @@ export default function ContractorDashboard() {
                 </div>
               ) : (
                 <>
+                  {/* Speech to Text Hindi Voice Quick Fill */}
+                  <div className="bg-brand-blue/5 border border-brand-blue/15 rounded-2xl p-4 space-y-2.5">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <Mic className="w-5 h-5 text-brand-blue" />
+                        <span className="font-extrabold text-xs text-brand-blue uppercase tracking-wider">
+                          {language === 'en' ? 'Hindi Voice Quick-Fill' : 'हिंदी आवाज़ से भरें'}
+                        </span>
+                      </div>
+                      
+                      {isListening && (
+                        <div className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-red-600 rounded-full animate-ping"></span>
+                          <span className="text-[10px] text-red-600 font-extrabold uppercase tracking-wider animate-pulse">
+                            {language === 'en' ? 'Listening...' : 'सुन रहे हैं...'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
+                      {language === 'en' 
+                        ? 'Tap the mic and describe the bill details in Hindi (e.g. "280 ft mal lia hai kashipur ka party, 20 tarik ko")' 
+                        : 'माइक दबाकर बिल की जानकारी हिंदी में बोलें (उदा. "280 फीट माल लिया है काशीपुर का पार्टी, 20 तारीख को")'}
+                    </p>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={startSpeechRecognition}
+                        className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 ${
+                          isListening 
+                            ? 'bg-red-600 hover:bg-red-500 text-white shadow-md shadow-red-600/10' 
+                            : 'bg-brand-blue hover:bg-brand-blue/95 text-white shadow-md shadow-brand-blue/10'
+                        }`}
+                      >
+                        <Mic className="w-4 h-4 shrink-0" />
+                        <span>
+                          {isListening 
+                            ? (language === 'en' ? 'Stop Listening' : 'सुनना बंद करें') 
+                            : (language === 'en' ? 'Start Speaking' : 'बोलना शुरू करें')}
+                        </span>
+                      </button>
+                    </div>
+
+                    {listeningError && (
+                      <span className="text-[9px] text-red-500 font-bold block text-center">
+                        ⚠️ {listeningError}
+                      </span>
+                    )}
+
+                    {voiceTranscript && (
+                      <div className="p-2 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">
+                          {language === 'en' ? 'Transcribed Text' : 'सुना गया पाठ'}
+                        </span>
+                        <p className="text-[11px] text-slate-700 font-semibold leading-normal italic">
+                          "{voiceTranscript}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Photo Upload Area - COMPACT */}
                   <div>
                     <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
@@ -1112,11 +1562,25 @@ export default function ContractorDashboard() {
                         inputMode="decimal"
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xl font-black focus:outline-none transition-all placeholder:text-slate-300"
+                        className="w-full pl-10 pr-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 text-xl font-black focus:outline-none transition-all placeholder:text-slate-350"
                         placeholder="0.00"
                         required
                       />
                     </div>
+                  </div>
+
+                  {/* Place / Location - Optional */}
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 uppercase mb-1.5">
+                      {t.placeOpt}
+                    </label>
+                    <input
+                      type="text"
+                      value={place}
+                      onChange={(e) => setPlace(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-100 border border-slate-200 focus:border-brand-blue focus:bg-white rounded-xl text-slate-900 font-bold focus:outline-none transition-all placeholder:text-slate-355"
+                      placeholder={t.placePlaceholder}
+                    />
                   </div>
 
                   {/* Bill Date - REQUIRED */}
@@ -1181,6 +1645,31 @@ export default function ContractorDashboard() {
           </div>
         </div>
       )}
+
+      {/* Toast Notifications Overlay */}
+      <div className="fixed top-4 right-4 left-4 sm:left-auto sm:w-96 z-55 space-y-3 pointer-events-none">
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            className="pointer-events-auto bg-slate-900/90 text-white p-4 rounded-2xl shadow-2xl border border-slate-700/50 backdrop-blur-md flex gap-3 animate-fade-in transition-all duration-300 transform translate-y-0"
+          >
+            <div className="bg-brand-blue/20 p-2 rounded-xl h-10 w-10 flex items-center justify-center shrink-0">
+              <Megaphone className="w-5 h-5 text-brand-blue" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-extrabold text-sm block leading-snug truncate">{t.title}</span>
+              <p className="text-xs text-slate-300 font-semibold mt-1 leading-normal">{t.message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setToasts(prev => prev.filter(toast => toast.id !== t.id))}
+              className="text-slate-400 hover:text-white shrink-0 cursor-pointer self-start"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
