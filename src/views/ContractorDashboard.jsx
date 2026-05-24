@@ -954,69 +954,72 @@ export default function ContractorDashboard() {
         </div>
       </header>
 
-      {/* Main Content (Mobile Optimized) */}
-      <main className="max-w-md w-full mx-auto p-4 pb-28 flex-1 flex flex-col gap-6">
+      {/* Main Content (Strict 30/40/30 Ratio Layout) */}
+      <main className={`max-w-md w-full mx-auto ${
+        activeTab === 'dashboard' 
+          ? 'h-[calc(100dvh-130px)] flex flex-col px-4 pt-3 pb-2 gap-3 overflow-hidden' 
+          : 'p-4 pb-28 flex-1 flex flex-col gap-6'
+      }`}>
         
         {activeTab === 'dashboard' && (
           <>
-            {/* Points Display - GIGANTIC */}
-            <div className="bg-gradient-to-br from-brand-dark to-slate-900 text-white rounded-3xl p-6 shadow-xl border border-slate-800 text-center relative overflow-hidden">
+            {/* TOP BOX - 30% (flex-[3]) */}
+            <div className="flex-[2.5] w-full bg-gradient-to-br from-brand-dark to-slate-900 text-white rounded-3xl p-4 shadow-xl border border-slate-800 flex flex-col justify-center items-center relative overflow-hidden">
               <div className="absolute -top-10 -right-10 w-32 h-32 bg-brand-blue/10 rounded-full blur-2xl"></div>
               <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-yellow-500/5 rounded-full blur-2xl"></div>
               
-              <div className="flex justify-center mb-2">
-                <Award className="w-12 h-12 text-yellow-400 animate-bounce" />
+              <div className="mb-1 sm:mb-2 relative z-10">
+                <Award className="w-8 h-8 sm:w-10 sm:h-10 text-yellow-400 animate-bounce" />
               </div>
               
-              <p className="text-xs font-black uppercase tracking-widest text-slate-400">{t.totalPoints}</p>
-              <h2 className="text-6xl font-black text-white mt-1 tracking-tight drop-shadow-md">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 relative z-10">{t.totalPoints}</p>
+              <h2 className="text-4xl sm:text-5xl font-black text-white mt-1 tracking-tight drop-shadow-md relative z-10">
                 {(userData?.totalPoints || 0).toLocaleString()}
               </h2>
-              <p className="text-[10px] text-brand-blue font-bold uppercase tracking-widest mt-2">{t.subPoints}</p>
+              <p className="text-[9px] text-brand-blue font-bold uppercase tracking-widest mt-1 relative z-10">{t.subPoints}</p>
             </div>
 
-            {/* Active Goal Progress Card */}
-            <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-200">
-              <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 text-center">
+            {/* MIDDLE BOX - 40% (flex-[4]) */}
+            <div className="flex-[4] w-full bg-white rounded-3xl p-4 shadow-xl border border-slate-200 flex flex-col justify-center overflow-hidden">
+              <h3 className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-slate-400 mb-2 text-center shrink-0">
                 {t.activeGoalProgress}
               </h3>
               
               {redeemSuccess ? (
-                <div className="py-6 text-center space-y-3">
-                  <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto border border-green-200">
-                    <CheckCircle2 className="w-10 h-10 stroke-[2.5]" />
+                <div className="text-center space-y-2 flex flex-col items-center justify-center h-full">
+                  <div className="w-12 h-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center border border-green-200">
+                    <CheckCircle2 className="w-8 h-8 stroke-[2.5]" />
                   </div>
-                  <h4 className="text-xl font-black text-slate-800 uppercase">{t.redemptionSuccess}</h4>
-                  <p className="text-xs text-slate-500 font-semibold">{t.redemptionSuccessSub}</p>
+                  <h4 className="text-lg font-black text-slate-800 uppercase">{t.redemptionSuccess}</h4>
+                  <p className="text-[10px] text-slate-500 font-semibold">{t.redemptionSuccessSub}</p>
                 </div>
               ) : userData?.activeGoal ? (
-                <div className="space-y-4">
+                <div className="flex flex-col h-full justify-evenly">
                   {/* Goal Details Row */}
-                  <div className="flex gap-4 items-center">
-                    <div className="w-20 h-20 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                  <div className="flex gap-3 items-center shrink-0">
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
                       {userData.activeGoal.imageUrl ? (
                         <img src={userData.activeGoal.imageUrl} alt={userData.activeGoal.name} className="w-full h-full object-cover" />
                       ) : (
-                        <ImageIcon className="w-8 h-8 text-slate-400" />
+                        <ImageIcon className="w-6 h-6 text-slate-400" />
                       )}
                     </div>
-                    <div className="flex-1 space-y-1">
-                      <h4 className="font-extrabold text-slate-800 text-base leading-tight">{userData.activeGoal.name}</h4>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-extrabold text-slate-800 text-sm leading-tight truncate">{userData.activeGoal.name}</h4>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
                         {t.target}: <span className="text-brand-blue">{userData.activeGoal.pointsRequired.toLocaleString()} {t.pts}</span>
                       </p>
                     </div>
                   </div>
 
                   {/* Progress Tracker Info */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-bold text-slate-600 uppercase">
+                  <div className="space-y-1 mt-2 shrink-0">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-600 uppercase">
                       <span>{Math.min(Math.round(((userData?.totalPoints || 0) / userData.activeGoal.pointsRequired) * 100), 100)}% {t.complete}</span>
                       <span>{(userData?.totalPoints || 0).toLocaleString()} / {userData.activeGoal.pointsRequired.toLocaleString()} {t.pts}</span>
                     </div>
-                    
-                    {/* The Progress Bar - Nilkamal Blue #0093DD */}
-                    <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden border border-slate-200 p-0.5">
+                    {/* The Progress Bar */}
+                    <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200 p-0.5">
                       <div 
                         className="h-full bg-brand-blue rounded-full transition-all duration-500 shadow-md shadow-brand-blue/15"
                         style={{ width: `${Math.min(Math.round(((userData?.totalPoints || 0) / userData.activeGoal.pointsRequired) * 100), 100)}%` }}
@@ -1024,61 +1027,60 @@ export default function ContractorDashboard() {
                     </div>
                   </div>
 
-                  {/* Redeem Button - pulsing large target */}
-                  {(userData?.totalPoints || 0) >= userData.activeGoal.pointsRequired ? (
-                    <button
-                      type="button"
-                      onClick={handleRedeemPrize}
-                      disabled={redeeming}
-                      className="w-full py-4 px-6 bg-green-600 hover:bg-green-500 active:scale-[0.98] text-white rounded-2xl text-base font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all shadow-xl shadow-green-600/10 hover:shadow-green-600/20 animate-pulse border-2 border-white"
-                    >
-                      {redeeming ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      ) : (
-                        <>
-                          <Award className="w-5 h-5" />
-                          <span>{t.redeemPrizeNow}</span>
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="bg-amber-500/10 border-2 border-amber-400/40 rounded-2xl p-4 text-center shadow-lg shadow-amber-500/5 animate-blink-highlight">
-                      <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest block mb-1">
-                        {t.goalFocus}
-                      </span>
-                      <p className="text-sm font-extrabold text-slate-700 leading-snug">
-                        {t.goalFocusText.split('{points}')[0]}
-                        <span className="text-lg font-black text-brand-blue">
-                          {(userData.activeGoal.pointsRequired - (userData?.totalPoints || 0)).toLocaleString()}
+                  {/* Redeem Button / Focus Box */}
+                  <div className="mt-2 shrink-0">
+                    {(userData?.totalPoints || 0) >= userData.activeGoal.pointsRequired ? (
+                      <button
+                        type="button"
+                        onClick={handleRedeemPrize}
+                        disabled={redeeming}
+                        className="w-full py-2.5 sm:py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl border-2 border-white transition-all active:scale-[0.98]"
+                      >
+                        {redeeming ? (
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        ) : (
+                          <>
+                            <Award className="w-4 h-4" />
+                            <span>{t.redeemPrizeNow}</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="bg-amber-500/10 border-2 border-amber-400/40 rounded-xl p-2 sm:p-3 text-center">
+                        <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest block mb-0.5">
+                          {t.goalFocus}
                         </span>
-                        {t.goalFocusText.split('{points}')[1]}
-                      </p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">
-                        {t.uploadMoreBills}
-                      </p>
-                    </div>
-                  )}
+                        <p className="text-[11px] sm:text-xs font-extrabold text-slate-700 leading-snug">
+                          {t.goalFocusText.split('{points}')[0]}
+                          <span className="text-sm font-black text-brand-blue px-1">
+                            {(userData.activeGoal.pointsRequired - (userData?.totalPoints || 0)).toLocaleString()}
+                          </span>
+                          {t.goalFocusText.split('{points}')[1]}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div className="py-6 text-center text-slate-500 space-y-2">
-                  <p className="text-sm font-bold">{t.noActiveGoal}</p>
-                  <p className="text-xs text-slate-400">{t.noActiveGoalSub}</p>
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-1">
+                  <p className="text-xs font-bold">{t.noActiveGoal}</p>
+                  <p className="text-[9px] text-slate-400 text-center">{t.noActiveGoalSub}</p>
                 </div>
               )}
             </div>
 
-            {/* Upload Button - MASSIVE */}
+            {/* BOTTOM BOX - 30% (flex-[3]) */}
             <button
               onClick={() => setShowUploadModal(true)}
-              className="w-full bg-brand-blue hover:bg-brand-blue/95 active:scale-[0.97] text-white rounded-3xl p-8 shadow-xl shadow-brand-blue/20 hover:shadow-brand-blue/30 transition-all flex flex-col items-center justify-center gap-4 cursor-pointer border-4 border-white mb-4"
+              className="flex-[2.5] w-full bg-brand-blue hover:bg-brand-blue/95 active:scale-[0.97] text-white rounded-3xl p-4 shadow-xl shadow-brand-blue/20 transition-all flex flex-col items-center justify-center gap-2 cursor-pointer border-4 border-white"
             >
-              <div className="bg-white/20 p-4 rounded-full">
-                <Plus className="w-14 h-14 text-white stroke-[3.5]" />
+              <div className="bg-white/20 p-2 sm:p-3 rounded-full">
+                <Plus className="w-8 h-8 sm:w-10 sm:h-10 text-white stroke-[3.5]" />
               </div>
-              <span className="text-2xl font-black tracking-wide uppercase text-white">
+              <span className="text-lg sm:text-xl font-black tracking-wide uppercase text-white">
                 {t.uploadNewBill}
               </span>
-              <span className="text-xs font-semibold text-brand-blue-50/80 bg-brand-dark/20 px-4 py-1 rounded-full uppercase tracking-wider -mt-1">
+              <span className="text-[9px] sm:text-[10px] font-semibold text-brand-blue-50/80 bg-brand-dark/20 px-3 py-1 rounded-full uppercase tracking-wider">
                 {t.tapToUpload}
               </span>
             </button>
@@ -1103,39 +1105,46 @@ export default function ContractorDashboard() {
                 <p className="text-xs text-slate-400">{t.askAdminRewards}</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-2.5">
                 {goals.map((g) => {
                   const isSelectedGoal = userData?.activeGoal && userData.activeGoal.name === g.name;
                   return (
-                    <div key={g.id || g.name} className="bg-white rounded-2xl overflow-hidden border border-slate-200 flex flex-col shadow-sm">
-                      {/* Goal Image */}
-                      <div className="h-40 bg-slate-50 border-b border-slate-150 flex items-center justify-center overflow-hidden relative">
+                    <div 
+                      key={g.id || g.name} 
+                      className="bg-white rounded-2xl overflow-hidden border border-slate-200 flex p-2.5 gap-3 items-center shadow-sm hover:shadow-md transition-all"
+                    >
+                      {/* Left Side: Thumbnail */}
+                      <div className="w-20 h-20 bg-slate-50 border border-slate-150 rounded-xl overflow-hidden shrink-0 flex items-center justify-center">
                         {g.imageUrl ? (
                           <img src={g.imageUrl} alt={g.name} className="w-full h-full object-cover" />
                         ) : (
-                          <ImageIcon className="w-10 h-10 text-slate-400" />
+                          <ImageIcon className="w-6 h-6 text-slate-400" />
                         )}
-                        <span className="absolute top-2 right-2 bg-brand-dark/85 backdrop-blur-sm text-brand-blue text-[10px] font-black px-2.5 py-1 rounded-full border border-brand-blue/30 uppercase tracking-wider">
-                          {g.pointsRequired.toLocaleString()} {t.pts}
-                        </span>
                       </div>
-                      {/* Goal Info */}
-                      <div className="p-4 flex-1 flex flex-col justify-between gap-3">
-                        <div>
-                          <h4 className="font-extrabold text-slate-800 text-sm leading-snug line-clamp-2">{g.name}</h4>
+
+                      {/* Right Side: Details & Set Goal button */}
+                      <div className="flex-1 min-w-0 flex flex-col justify-between h-20 py-0.5">
+                        <div className="space-y-1">
+                          <h4 className="font-extrabold text-slate-800 text-xs leading-snug line-clamp-2">{g.name}</h4>
+                          <span className="inline-block bg-brand-blue/10 text-brand-blue text-[9px] font-black px-2 py-0.5 rounded-full border border-brand-blue/20 uppercase tracking-wider">
+                            {g.pointsRequired.toLocaleString()} {t.pts}
+                          </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleSelectGoal(g)}
-                          disabled={isSelectedGoal}
-                          className={`w-full py-2.5 px-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            isSelectedGoal
-                              ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/10 pointer-events-none'
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95'
-                          }`}
-                        >
-                          {isSelectedGoal ? t.currentGoal : t.setAsGoal}
-                        </button>
+
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectGoal(g)}
+                            disabled={isSelectedGoal}
+                            className={`py-1.5 px-3.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                              isSelectedGoal
+                                ? 'bg-brand-blue text-white shadow-sm shadow-brand-blue/10 pointer-events-none'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 active:scale-95'
+                            }`}
+                          >
+                            {isSelectedGoal ? t.currentGoal : t.setAsGoal}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
