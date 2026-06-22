@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { LogOut, Plus, Image as ImageIcon, Camera, X, Award, FileText, CheckCircle2, AlertCircle, Clock, LayoutDashboard, Gift, History, Mic, Megaphone } from 'lucide-react';
-import { collection, addDoc, query, where, getDocs, orderBy, onSnapshot, doc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
 const translations = {
@@ -222,6 +222,29 @@ export default function ContractorDashboard() {
   useEffect(() => {
     localStorage.setItem('nilkamal_contractor_lang', language);
   }, [language]);
+
+  // Update last active/visited time when app is opened
+  useEffect(() => {
+    if (user && user.uid) {
+      if (!isMock) {
+        const updateLastActive = async () => {
+          try {
+            await updateDoc(doc(db, 'users', user.uid), { lastLoginTime: Date.now() });
+          } catch (err) {
+            console.error("Error updating last active time:", err);
+          }
+        };
+        updateLastActive();
+      } else {
+        const savedMockUser = localStorage.getItem('nilkamal_mock_user');
+        if (savedMockUser) {
+          const parsed = JSON.parse(savedMockUser);
+          parsed.lastLoginTime = Date.now();
+          localStorage.setItem('nilkamal_mock_user', JSON.stringify(parsed));
+        }
+      }
+    }
+  }, [user, isMock]);
 
   const t = translations[language];
 

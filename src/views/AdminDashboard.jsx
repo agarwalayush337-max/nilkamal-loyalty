@@ -1451,7 +1451,7 @@ export default function AdminDashboard() {
                             <span className="font-extrabold text-slate-700">{c.mobileNumber || 'N/A'}</span>
                           </div>
                           <div className="bg-white p-2.5 rounded-xl border border-slate-150">
-                            <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">Last Login Time</span>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider">Last Visited Time</span>
                             <span className="font-extrabold text-slate-700">
                               {c.lastLoginTime ? formatDateTime(c.lastLoginTime) : 'N/A'}
                             </span>
@@ -2196,7 +2196,7 @@ export default function AdminDashboard() {
                     <span className="text-2xl font-black text-brand-blue">{points.toLocaleString()} Pts</span>
                   </div>
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm text-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Login</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Last Visited</span>
                     <span className="text-xs font-extrabold text-slate-700 block mt-1.5 leading-snug">
                       {c.lastLoginTime ? formatDateTime(c.lastLoginTime) : 'N/A'}
                     </span>
