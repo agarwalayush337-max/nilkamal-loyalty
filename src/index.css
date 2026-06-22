@@ -102,3 +102,68 @@ input[type=number] {
 .lang-hi * {
   letter-spacing: normal !important;
 }
+
+/* 30% Font size scaling for top and middle boxes in English (default) */
+.dashboard-top-box,
+.dashboard-middle-box {
+  --text-xs: 0.975rem;
+  --text-sm: 1.1375rem;
+  --text-base: 1.3rem;
+  --text-lg: 1.4625rem;
+  --text-xl: 1.625rem;
+  --text-2xl: 1.95rem;
+  --text-3xl: 2.4375rem;
+}
+
+.dashboard-top-box .text-\[8px\],
+.dashboard-middle-box .text-\[8px\] {
+  font-size: 10.4px !important;
+}
+.dashboard-top-box .text-\[9px\],
+.dashboard-middle-box .text-\[9px\] {
+  font-size: 11.7px !important;
+}
+.dashboard-top-box .text-\[10px\],
+.dashboard-middle-box .text-\[10px\] {
+  font-size: 13px !important;
+}
+.dashboard-top-box .text-\[11px\],
+.dashboard-middle-box .text-\[11px\] {
+  font-size: 14.3px !important;
+}
+
+/* 40% Font size scaling for top and middle boxes in Hindi (approx 30% + Devanagari offset) */
+.lang-hi .dashboard-top-box,
+.lang-hi .dashboard-middle-box {
+  --text-xs: 1.05rem;
+  --text-xs--line-height: 1.4;
+  --text-sm: 1.225rem;
+  --text-sm--line-height: 1.45;
+  --text-base: 1.4rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.575rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.75rem;
+  --text-xl--line-height: 1.5;
+  --text-2xl: 2.1rem;
+  --text-2xl--line-height: 1.4;
+  --text-3xl: 2.625rem;
+  --text-3xl--line-height: 1.4;
+}
+
+.lang-hi .dashboard-top-box .text-\[8px\],
+.lang-hi .dashboard-middle-box .text-\[8px\] {
+  font-size: 11.2px !important;
+}
+.lang-hi .dashboard-top-box .text-\[9px\],
+.lang-hi .dashboard-middle-box .text-\[9px\] {
+  font-size: 12.6px !important;
+}
+.lang-hi .dashboard-top-box .text-\[10px\],
+.lang-hi .dashboard-middle-box .text-\[10px\] {
+  font-size: 14px !important;
+}
+.lang-hi .dashboard-top-box .text-\[11px\],
+.lang-hi .dashboard-middle-box .text-\[11px\] {
+  font-size: 15.4px !important;
+}

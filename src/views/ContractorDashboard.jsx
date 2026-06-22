@@ -964,7 +964,7 @@ export default function ContractorDashboard() {
         {activeTab === 'dashboard' && (
           <>
             {/* TOP BOX - 30% (flex-[3]) */}
-            <div className="flex-[2.5] w-full bg-gradient-to-br from-brand-dark to-slate-900 text-white rounded-3xl p-4 shadow-xl border border-slate-800 flex flex-col justify-center items-center relative overflow-hidden">
+            <div className="dashboard-top-box flex-[2.5] w-full bg-gradient-to-br from-brand-dark to-slate-900 text-white rounded-3xl p-4 shadow-xl border border-slate-800 flex flex-col justify-center items-center relative overflow-hidden">
               <div className="absolute -top-10 -right-10 w-32 h-32 bg-brand-blue/10 rounded-full blur-2xl"></div>
               <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-yellow-500/5 rounded-full blur-2xl"></div>
               
@@ -980,7 +980,7 @@ export default function ContractorDashboard() {
             </div>
 
             {/* MIDDLE BOX - 40% (flex-[4]) */}
-            <div className="flex-[4] w-full bg-white rounded-3xl p-4 shadow-xl border border-slate-200 flex flex-col justify-center overflow-hidden">
+            <div className="dashboard-middle-box flex-[4] w-full bg-white rounded-3xl p-4 shadow-xl border border-slate-200 flex flex-col justify-center overflow-hidden">
               <h3 className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-slate-400 mb-2 text-center shrink-0">
                 {t.activeGoalProgress}
               </h3>
