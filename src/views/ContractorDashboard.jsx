@@ -94,59 +94,59 @@ const translations = {
     
     // Dashboard / Points
     totalPoints: "आपके कुल पॉइंट्स",
-    subPoints: "नीलकमल ठेकेदार इनाम पॉइंट्स",
+    subPoints: "नीलकमल कॉन्ट्रैक्टर रिवॉर्ड पॉइंट्स",
     
     // Active Goal Progress
-    activeGoalProgress: "🎯 सक्रिय लक्ष्य प्रगति",
-    redemptionSuccess: "सफल मोचन!",
-    redemptionSuccessSub: "आपका इनाम अनुरोध व्यवस्थापक को भेज दिया गया है।",
-    target: "लक्ष्य",
+    activeGoalProgress: "🎯 एक्टिव गोल प्रोग्रेस",
+    redemptionSuccess: "रिडेम्पशन सफल!",
+    redemptionSuccessSub: "आपका रिवॉर्ड रिक्वेस्ट एडमिन को भेज दिया गया है।",
+    target: "टारगेट",
     pts: "पॉइंट्स",
-    complete: "पूरा",
+    complete: "कम्पलीट",
     redeemPrizeNow: "अभी इनाम रिडीम करें",
-    goalFocus: "🎯 लक्ष्य पर ध्यान दें",
-    goalFocusText: "आपको अपना इनाम पाने के लिए केवल {points} और पॉइंट्स की आवश्यकता है!",
+    goalFocus: "🎯 गोल फोकस",
+    goalFocusText: "आपको अपना इनाम पाने के लिए केवल {points} और पॉइंट्स चाहिए!",
     uploadMoreBills: "पॉइंट्स इकट्ठा करने के लिए और बिल अपलोड करें",
-    noActiveGoal: "कोई सक्रिय लक्ष्य नहीं चुना गया।",
-    noActiveGoalSub: "लक्ष्य निर्धारित करने और प्रगति को ट्रैक करने के लिए इनाम कैटलॉग से एक इनाम चुनें!",
+    noActiveGoal: "कोई एक्टिव गोल नहीं चुना गया।",
+    noActiveGoalSub: "गोल सेट करने और प्रोग्रेस ट्रैक करने के लिए नीचे कैटलॉग से एक इनाम चुनें!",
     
     // Upload Button
     uploadNewBill: "नया बिल अपलोड करें",
     tapToUpload: "कैमरा खोलने और अपलोड करने के लिए टैप करें",
     
     // Rewards Catalog
-    rewardsCatalog: "इनाम कैटलॉग",
-    loadingCatalog: "इनाम कैटलॉग लोड हो रहा है...",
+    rewardsCatalog: "रिवॉर्ड्स कैटलॉग",
+    loadingCatalog: "रिवॉर्ड्स कैटलॉग लोड हो रहा है...",
     noRewardsYet: "अभी तक कोई इनाम नहीं जोड़ा गया है।",
-    askAdminRewards: "व्यवस्थापक से इनाम बनाने के लिए कहें!",
-    currentGoal: "🎯 सक्रिय लक्ष्य",
-    setAsGoal: "लक्ष्य के रूप में सेट करें",
+    askAdminRewards: "एडमिन से इनाम बनाने के लिए कहें!",
+    currentGoal: "🎯 एक्टिव गोल",
+    setAsGoal: "गोल सेट करें",
     
     // Submitted Bills
     yourSubmittedBills: "आपके सबमिट किए गए बिल",
     loadingBillHistory: "बिल इतिहास लोड हो रहा है...",
     noBillsUploaded: "अभी तक कोई बिल अपलोड नहीं किया गया है।",
-    submitFirstBill: "पॉइंट्स अर्जित करने के लिए ऊपर अपना पहला बिल सबमिट करें!",
-    billNumber: "बिल संख्या",
-    amt: "राशि",
-    rft: "रनिंग फीट",
-    approved: "स्वीकृत",
-    rejected: "अस्वीकृत",
-    waiting: "प्रतीक्षारत",
+    submitFirstBill: "पॉइंट्स कमाने के लिए ऊपर अपना पहला बिल सबमिट करें!",
+    billNumber: "बिल नंबर",
+    amt: "बिल अमाउंट",
+    rft: "रनिंग फीट (RFT)",
+    approved: "अप्रूव्ड",
+    rejected: "रिजेक्टेड",
+    waiting: "वेटिंग",
     
     // Redemption History
-    redemptionHistory: "इनाम अनुरोध इतिहास",
-    loadingRedemptionHistory: "अनुरोध इतिहास लोड हो रहा है...",
-    noRedemptionsYet: "अभी तक कोई इनाम अनुरोध नहीं किया गया है।",
-    completeGoalRedeem: "इनाम रिडीम करने के लिए एक लक्ष्य पूरा करें!",
+    redemptionHistory: "रिडेम्पशन हिस्ट्री",
+    loadingRedemptionHistory: "रिडेम्पशन हिस्ट्री लोड हो रहा है...",
+    noRedemptionsYet: "अभी तक कोई रिडेम्पशन रिक्वेस्ट नहीं की गई है।",
+    completeGoalRedeem: "इनाम रिडीम करने के लिए गोल पूरा करें!",
     spent: "खर्च किए गए",
-    date: "दिनांक",
-    delivered: "वितरित",
-    requested: "अनुरोधित",
+    date: "डेट",
+    delivered: "डिलिवर्ड",
+    requested: "रिक्वेस्टेड",
     handedOver: "हैंडओवर किया गया",
     viewDeliveryPhoto: "डिलिवरी फोटो देखें",
-    proofOfDelivery: "डिलिवरी का प्रमाण",
-    proofOfDeliverySub: "यह आइटम व्यवस्थापक द्वारा सफलतापूर्वक वितरित कर दिया गया है।",
+    proofOfDelivery: "डिलिवरी प्रूफ",
+    proofOfDeliverySub: "यह आइटम एडमिन द्वारा सफलतापूर्वक डिलीवर कर दिया गया है।",
     
     // Upload Modal
     newBillUpload: "नया बिल अपलोड",
@@ -156,14 +156,14 @@ const translations = {
     enterRft: "2. रनिंग फीट (RFT) दर्ज करें *",
     estPoints: "अर्जित करने के लिए अनुमानित पॉइंट्स",
     noteRft: "नोट: आप प्रत्येक 1 रनिंग फुट (RFT) के लिए ठीक 1 पॉइंट अर्जित करते हैं।",
-    enterAmt: "3. बिल राशि (₹) दर्ज करें *",
-    placeOpt: "4. स्थान / जगह (वैकल्पिक)",
+    enterAmt: "3. बिल अमाउंट (₹) दर्ज करें *",
+    placeOpt: "4. जगह / लोकेशन (वैकल्पिक)",
     placePlaceholder: "उदा. काशीपुर",
-    billNumOpt: "5. बिल संख्या (वैकल्पिक)",
-    billDateLabel: "6. बिल दिनांक *",
+    billNumOpt: "5. बिल नंबर (वैकल्पिक)",
+    billDateLabel: "6. बिल डेट *",
     sendBillNow: "अभी बिल भेजें",
     submitted: "सबमिट हो गया!",
-    waitApproval: "पॉइंट्स प्राप्त करने के लिए मुख्य मंजूरी की प्रतीक्षा करें।"
+    waitApproval: "पॉइंट्स पाने के लिए एडमिन की मंजूरी का इंतजार करें।"
   }
 };
 
@@ -909,7 +909,7 @@ export default function ContractorDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col pb-24">
+    <div className={`min-h-screen bg-slate-100 flex flex-col pb-24 ${language === 'hi' ? 'lang-hi' : ''}`}>
       {/* Header */}
       <header className="bg-brand-dark text-white p-4 shadow-md flex justify-between items-center sticky top-0 z-10">
         <div>
@@ -972,11 +972,11 @@ export default function ContractorDashboard() {
                 <Award className="w-8 h-8 sm:w-10 sm:h-10 text-yellow-400 animate-bounce" />
               </div>
               
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 relative z-10">{t.totalPoints}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 relative z-10 whitespace-nowrap">{t.totalPoints}</p>
               <h2 className="text-4xl sm:text-5xl font-black text-white mt-1 tracking-tight drop-shadow-md relative z-10">
                 {(userData?.totalPoints || 0).toLocaleString()}
               </h2>
-              <p className="text-[9px] text-brand-blue font-bold uppercase tracking-widest mt-1 relative z-10">{t.subPoints}</p>
+              <p className="text-[9px] text-brand-blue font-bold uppercase tracking-widest mt-1 relative z-10 whitespace-nowrap">{t.subPoints}</p>
             </div>
 
             {/* MIDDLE BOX - 40% (flex-[4]) */}

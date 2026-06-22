@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the user is logged in
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Rules for the users collection
+    match /users/{userId} {
+      // Allow read (get/list) to everyone. This is REQUIRED because unauthenticated 
+      // users checking if a phone number exists during OTP send do not have request.auth yet.
+      allow read: if true;
+      
+      // Allow write actions (create, update, delete) only if authenticated
+      allow write: if isAuthenticated();
+    }
+
+    // Rules for claims (bill submissions)
+    match /claims/{claimId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Rules for redemptions (prize reward requests)
+    match /redemptions/{redemptionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Rules for goals (reward catalog)
+    match /goals/{goalId} {
+      allow read: if true; // Anyone can view the catalog
+      allow write: if isAuthenticated();
+    }
+
+    // Rules for announcements (admin updates)
+    match /announcements/{announcementId} {
+      allow read: if true; // Anyone can view updates
+      allow write: if isAuthenticated();
+    }
+
+    // Rules for notifications
+    match /notifications/{notificationId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
