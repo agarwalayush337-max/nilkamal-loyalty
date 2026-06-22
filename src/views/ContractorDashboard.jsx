@@ -223,18 +223,17 @@ export default function ContractorDashboard() {
     localStorage.setItem('nilkamal_contractor_lang', language);
   }, [language]);
 
-  // Update last active/visited time when app is opened
+  // Update last active/visited time when app is opened or resumed from background
   useEffect(() => {
-    if (user && user.uid) {
+    if (!user || !user.uid) return;
+
+    const updateLastActive = async () => {
       if (!isMock) {
-        const updateLastActive = async () => {
-          try {
-            await updateDoc(doc(db, 'users', user.uid), { lastLoginTime: Date.now() });
-          } catch (err) {
-            console.error("Error updating last active time:", err);
-          }
-        };
-        updateLastActive();
+        try {
+          await updateDoc(doc(db, 'users', user.uid), { lastLoginTime: Date.now() });
+        } catch (err) {
+          console.error("Error updating last active time:", err);
+        }
       } else {
         const savedMockUser = localStorage.getItem('nilkamal_mock_user');
         if (savedMockUser) {
@@ -243,7 +242,23 @@ export default function ContractorDashboard() {
           localStorage.setItem('nilkamal_mock_user', JSON.stringify(parsed));
         }
       }
-    }
+    };
+
+    // Update on initial mount/auth load
+    updateLastActive();
+
+    // Listen for visibility changes (resuming app from background/recent tasks)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        updateLastActive();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user, isMock]);
 
   const t = translations[language];
